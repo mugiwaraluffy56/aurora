@@ -4,8 +4,11 @@ import androidx.room.Database
 import androidx.room.RoomDatabase
 
 @Database(
-    entities = [VideoEntity::class],
-    version = 1,
+    entities = [
+        VideoEntity::class,
+        PlaybackProgressEntity::class,
+    ],
+    version = 2,
     exportSchema = true,
 )
 abstract class AuroraDatabase : RoomDatabase() {

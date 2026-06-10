@@ -35,4 +35,10 @@ interface VideoDao {
 
     @Query("DELETE FROM videos WHERE id = :videoId")
     suspend fun deleteById(videoId: Long)
+
+    @Query("SELECT * FROM playback_progress WHERE videoId = :videoId")
+    suspend fun getProgress(videoId: Long): PlaybackProgressEntity?
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insertOrReplaceProgress(progress: PlaybackProgressEntity)
 }

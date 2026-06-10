@@ -13,6 +13,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
@@ -31,7 +32,9 @@ import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
+import androidx.compose.ui.viewinterop.AndroidView
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -44,6 +47,10 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LocalLifecycleOwner
+import androidx.media3.ui.PlayerView
 import com.aurora.cinema.app.AppContainer
 import com.aurora.cinema.core.nativebridge.NativeCore
 import com.aurora.cinema.library.ImportResult
@@ -51,6 +58,7 @@ import com.aurora.cinema.library.LibrarySort
 import com.aurora.cinema.library.OfflineLibraryRepository
 import com.aurora.cinema.library.VideoAccessState
 import com.aurora.cinema.library.VideoItem
+import com.aurora.cinema.playback.PlaybackState
 import com.aurora.cinema.settings.AppSettings
 import com.aurora.cinema.settings.AppSettingsRepository
 import com.aurora.cinema.ui.theme.AuroraTheme
@@ -91,10 +99,24 @@ private fun AuroraShell(
     var selectedScreen by rememberSaveable { mutableStateOf(AppScreen.Library) }
     var selectedVideoId by rememberSaveable { mutableStateOf<Long?>(null) }
     val videos by appContainer.libraryRepository.videos.collectAsStateWithLifecycle(initialValue = emptyList())
+    val playbackState by appContainer.playerController.state.collectAsStateWithLifecycle()
     val scope = rememberCoroutineScope()
+    val lifecycleOwner = LocalLifecycleOwner.current
 
     LaunchedEffect(Unit) {
         appContainer.libraryRepository.refreshAccessChecks()
+    }
+
+    DisposableEffect(lifecycleOwner, appContainer.playerController) {
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_STOP) {
+                appContainer.playerController.saveProgress()
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose {
+            lifecycleOwner.lifecycle.removeObserver(observer)
+        }
     }
 
     Scaffold(
@@ -137,9 +159,17 @@ private fun AuroraShell(
                 )
                 AppScreen.Player -> PlayerScreen(
                     selectedVideo = videos.firstOrNull { it.id == selectedVideoId },
+                    playbackState = playbackState,
+                    appContainer = appContainer,
                 )
                 AppScreen.VideoDetails -> VideoDetailsScreen(
                     video = videos.firstOrNull { it.id == selectedVideoId },
+                    playbackState = playbackState,
+                    onPlay = { video ->
+                        selectedVideoId = video.id
+                        appContainer.playerController.select(video)
+                        selectedScreen = AppScreen.Player
+                    },
                     onDelete = { videoId ->
                         selectedVideoId = null
                         selectedScreen = AppScreen.Library
@@ -292,14 +322,81 @@ private fun LibraryScreen(
 }
 
 @Composable
-private fun PlayerScreen(selectedVideo: VideoItem?) {
+private fun PlayerScreen(
+    selectedVideo: VideoItem?,
+    playbackState: PlaybackState,
+    appContainer: AppContainer,
+) {
     ScreenColumn {
         ScreenHeader(
             title = "Player",
-            subtitle = "Normal phone playback and VR entry controls will live here.",
+            subtitle = "Normal phone playback for the selected offline video.",
         )
-        StatusRow(label = "Selected video", value = selectedVideo?.displayName ?: "No video selected")
-        StatusRow(label = "Mode", value = "Phone playback pending")
+        if (playbackState.selectedVideo != null) {
+            AndroidView(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .aspectRatio(16 / 9f),
+                factory = { context ->
+                    PlayerView(context).apply {
+                        player = appContainer.playerController.mediaPlayer
+                        useController = true
+                    }
+                },
+                update = { playerView ->
+                    playerView.player = appContainer.playerController.mediaPlayer
+                },
+            )
+            Spacer(modifier = Modifier.height(16.dp))
+        }
+        StatusRow(label = "Selected video", value = playbackState.selectedVideo?.displayName ?: selectedVideo?.displayName ?: "No video selected")
+        StatusRow(label = "Position", value = "${playbackState.positionMs.timeLabel()} / ${playbackState.durationMs.timeLabel()}")
+        if (playbackState.error != null) {
+            Text(
+                text = playbackState.error.message,
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.error,
+            )
+            Spacer(modifier = Modifier.height(12.dp))
+        }
+        Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+            Button(
+                enabled = selectedVideo != null || playbackState.selectedVideo != null,
+                onClick = {
+                    if (playbackState.selectedVideo == null && selectedVideo != null) {
+                        appContainer.playerController.select(selectedVideo)
+                    }
+                    appContainer.playerController.play()
+                },
+            ) {
+                Text("Play")
+            }
+            OutlinedButton(
+                enabled = playbackState.selectedVideo != null,
+                onClick = { appContainer.playerController.pause() },
+            ) {
+                Text("Pause")
+            }
+            OutlinedButton(
+                enabled = playbackState.selectedVideo != null,
+                onClick = { appContainer.playerController.seekTo((playbackState.positionMs - 10_000L).coerceAtLeast(0L)) },
+            ) {
+                Text("-10s")
+            }
+            OutlinedButton(
+                enabled = playbackState.selectedVideo != null,
+                onClick = { appContainer.playerController.seekTo(playbackState.positionMs + 10_000L) },
+            ) {
+                Text("+10s")
+            }
+        }
+        Spacer(modifier = Modifier.height(12.dp))
+        OutlinedButton(
+            enabled = playbackState.selectedVideo != null,
+            onClick = { appContainer.playerController.stop() },
+        ) {
+            Text("Stop")
+        }
         StatusRow(label = "VR entry", value = "Not connected yet")
     }
 }
@@ -307,6 +404,8 @@ private fun PlayerScreen(selectedVideo: VideoItem?) {
 @Composable
 private fun VideoDetailsScreen(
     video: VideoItem?,
+    playbackState: PlaybackState,
+    onPlay: (VideoItem) -> Unit,
     onDelete: (Long) -> Unit,
 ) {
     ScreenColumn {
@@ -327,7 +426,18 @@ private fun VideoDetailsScreen(
             StatusRow(label = "Mime type", value = video.mimeType.ifBlank { "Unknown" })
             StatusRow(label = "Source", value = video.sourceType)
             StatusRow(label = "Access", value = video.accessLabel())
+            StatusRow(
+                label = "Playback",
+                value = if (playbackState.selectedVideo?.id == video.id) "Loaded" else "Not loaded",
+            )
             Spacer(modifier = Modifier.height(12.dp))
+            Button(
+                enabled = video.accessState == VideoAccessState.Available,
+                onClick = { onPlay(video) },
+            ) {
+                Text("Play video")
+            }
+            Spacer(modifier = Modifier.height(8.dp))
             OutlinedButton(onClick = { onDelete(video.id) }) {
                 Text("Remove from library")
             }
@@ -606,6 +716,19 @@ private fun VideoItem.accessLabel(): String {
     }
 }
 
+private fun Long.timeLabel(): String {
+    if (this <= 0L) return "0:00"
+    val totalSeconds = this / 1000L
+    val hours = totalSeconds / 3600L
+    val minutes = (totalSeconds % 3600L) / 60L
+    val seconds = totalSeconds % 60L
+    return if (hours > 0) {
+        "%d:%02d:%02d".format(hours, minutes, seconds)
+    } else {
+        "%d:%02d".format(minutes, seconds)
+    }
+}
+
 @Preview(showBackground = true)
 @Composable
 private fun AuroraAppPreview() {
@@ -628,6 +751,25 @@ private fun AuroraAppPreview() {
 
                     override suspend fun deleteLibraryEntry(videoId: Long) = Unit
                 }
+                override val playerController = object : com.aurora.cinema.playback.PlayerController {
+                    override val state: kotlinx.coroutines.flow.StateFlow<PlaybackState> =
+                        MutableStateFlow(PlaybackState())
+                    override val mediaPlayer: androidx.media3.common.Player? = null
+
+                    override fun select(video: VideoItem) = Unit
+
+                    override fun play() = Unit
+
+                    override fun pause() = Unit
+
+                    override fun seekTo(positionMs: Long) = Unit
+
+                    override fun stop() = Unit
+
+                    override fun saveProgress() = Unit
+                }
+                override val mediaSessionController: com.aurora.cinema.playback.MediaSessionController
+                    get() = error("Preview does not create a media session")
                 override val settingsRepository = object : AppSettingsRepository {
                     override val settings: Flow<AppSettings> = MutableStateFlow(
                         AppSettings(firstRunAcknowledged = true),
