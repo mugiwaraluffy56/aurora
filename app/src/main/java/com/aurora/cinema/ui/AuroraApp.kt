@@ -723,6 +723,71 @@ private fun GlassSecondaryButton(
 }
 
 @Composable
+private fun LiquidLoadingPill(
+    label: String,
+    modifier: Modifier = Modifier,
+) {
+    val infiniteTransition = rememberInfiniteTransition(label = "liquid-loading")
+    val dotOne by infiniteTransition.animateFloat(
+        initialValue = 0.35f,
+        targetValue = 1f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(durationMillis = 680, delayMillis = 0),
+            repeatMode = RepeatMode.Reverse,
+        ),
+        label = "loading-dot-one",
+    )
+    val dotTwo by infiniteTransition.animateFloat(
+        initialValue = 0.35f,
+        targetValue = 1f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(durationMillis = 680, delayMillis = 120),
+            repeatMode = RepeatMode.Reverse,
+        ),
+        label = "loading-dot-two",
+    )
+    val dotThree by infiniteTransition.animateFloat(
+        initialValue = 0.35f,
+        targetValue = 1f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(durationMillis = 680, delayMillis = 240),
+            repeatMode = RepeatMode.Reverse,
+        ),
+        label = "loading-dot-three",
+    )
+    Surface(
+        modifier = modifier.fillMaxWidth(),
+        color = Color.White.copy(alpha = 0.10f),
+        contentColor = MaterialTheme.colorScheme.onSurface,
+        shape = RoundedCornerShape(28.dp),
+        border = BorderStroke(1.dp, Color.White.copy(alpha = 0.18f)),
+        shadowElevation = 8.dp,
+    ) {
+        Row(
+            modifier = Modifier.padding(horizontal = 18.dp, vertical = 14.dp),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(
+                text = label,
+                style = MaterialTheme.typography.labelLarge,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                listOf(dotOne, dotTwo, dotThree).forEach { alpha ->
+                    Box(
+                        modifier = Modifier
+                            .size(7.dp)
+                            .graphicsLayer { this.alpha = alpha }
+                            .background(Color.White, CircleShape),
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
 private fun LibraryScreen(
     videos: List<VideoItem>,
     repository: OfflineLibraryRepository,
@@ -732,12 +797,19 @@ private fun LibraryScreen(
     var query by rememberSaveable { mutableStateOf("") }
     var sort by rememberSaveable { mutableStateOf(LibrarySort.Recent) }
     var importMessage by rememberSaveable { mutableStateOf<String?>(null) }
+    var importing by rememberSaveable { mutableStateOf(false) }
     val filePicker = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.OpenDocument(),
     ) { uri: Uri? ->
         if (uri != null) {
             scope.launch {
-                importMessage = repository.importVideo(uri).toMessage()
+                importing = true
+                importMessage = null
+                try {
+                    importMessage = repository.importVideo(uri).toMessage()
+                } finally {
+                    importing = false
+                }
             }
         }
     }
@@ -746,7 +818,13 @@ private fun LibraryScreen(
     ) { uri: Uri? ->
         if (uri != null) {
             scope.launch {
-                importMessage = repository.importFolder(uri).toMessage()
+                importing = true
+                importMessage = null
+                try {
+                    importMessage = repository.importFolder(uri).toMessage()
+                } finally {
+                    importing = false
+                }
             }
         }
     }
@@ -783,7 +861,10 @@ private fun LibraryScreen(
                 }
             }
         }
-        if (importMessage != null) {
+        if (importing) {
+            Spacer(modifier = Modifier.height(12.dp))
+            LiquidLoadingPill(label = "Importing for offline playback")
+        } else if (importMessage != null) {
             Spacer(modifier = Modifier.height(12.dp))
             Text(
                 text = importMessage.orEmpty(),
@@ -811,12 +892,12 @@ private fun LibraryScreen(
             Spacer(modifier = Modifier.height(12.dp))
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 LibrarySort.entries.forEach { option ->
-                FilterChip(
-                    selected = sort == option,
-                    onClick = { sort = option },
-                    label = { Text(option.label) },
-                    colors = glassChipColors(),
-                )
+                    FilterChip(
+                        selected = sort == option,
+                        onClick = { sort = option },
+                        label = { Text(option.label) },
+                        colors = glassChipColors(),
+                    )
                 }
             }
             Spacer(modifier = Modifier.height(20.dp))
@@ -1061,18 +1142,18 @@ private fun PlayerScreen(
                     modifier = Modifier.fillMaxWidth(),
                 )
                 Spacer(modifier = Modifier.height(16.dp))
-                Text(
-                    text = if (renderTelemetry.videoSurfaceAttached) {
-                        "Cinema surface connected · ${headTracker.sensorName}"
-                    } else {
-                        "Preparing cinema surface"
-                    },
-                    style = MaterialTheme.typography.labelMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
+                if (renderTelemetry.videoSurfaceAttached) {
+                    Text(
+                        text = "Cinema surface connected · ${headTracker.sensorName}",
+                        style = MaterialTheme.typography.labelMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                } else {
+                    LiquidLoadingPill(label = "Preparing cinema surface")
+                }
             }
         }
-    }
+        }
     }
 }
 
@@ -1633,8 +1714,31 @@ private fun EmptyState(
     actionIcon: ImageVector = Icons.Default.Add,
     onAction: (() -> Unit)? = null,
 ) {
+    var entered by remember { mutableStateOf(false) }
+    LaunchedEffect(Unit) {
+        entered = true
+    }
+    val scale by animateFloatAsState(
+        targetValue = if (entered) 1f else 0.96f,
+        animationSpec = spring(
+            dampingRatio = Spring.DampingRatioMediumBouncy,
+            stiffness = Spring.StiffnessLow,
+        ),
+        label = "empty-state-scale",
+    )
+    val alpha by animateFloatAsState(
+        targetValue = if (entered) 1f else 0f,
+        animationSpec = tween(durationMillis = 260),
+        label = "empty-state-alpha",
+    )
     Column(
-        modifier = Modifier.fillMaxWidth(),
+        modifier = Modifier
+            .fillMaxWidth()
+            .graphicsLayer {
+                scaleX = scale
+                scaleY = scale
+                this.alpha = alpha
+            },
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
         GlassIconBadge(icon = icon, size = 88, pulsing = true)
