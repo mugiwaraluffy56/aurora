@@ -8,8 +8,18 @@ import android.net.Uri
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.scaleIn
+import androidx.compose.animation.scaleOut
+import androidx.compose.animation.togetherWith
+import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.tween
@@ -92,7 +102,9 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -246,56 +258,70 @@ private fun AuroraShell(
                 ),
         ) {
             LiquidBackdrop()
-            when (selectedScreen) {
-                AppScreen.Library -> LibraryScreen(
-                    videos = videos,
-                    repository = appContainer.libraryRepository,
-                    onOpenDetails = { videoId ->
-                        selectedVideoId = videoId
-                        navigateTo(AppScreen.VideoDetails)
-                    },
-                )
-                AppScreen.Player -> PlayerScreen(
-                    selectedVideo = videos.firstOrNull { it.id == selectedVideoId },
-                    playbackState = playbackState,
-                    appContainer = appContainer,
-                    screenConfig = settings.cinemaScreenConfig,
-                    stereoConfig = settings.stereoConfig,
-                    vrMode = vrMode,
-                    onVrModeChanged = { vrMode = it },
-                    onBrowseLibrary = { navigateTo(AppScreen.Library) },
-                )
-                AppScreen.VideoDetails -> VideoDetailsScreen(
-                    video = videos.firstOrNull { it.id == selectedVideoId },
-                    playbackState = playbackState,
-                    onPlay = { video ->
-                        selectedVideoId = video.id
-                        appContainer.playerController.select(video)
-                        navigateTo(AppScreen.Player)
-                    },
-                    onDelete = { videoId ->
-                        selectedVideoId = null
-                        selectedScreen = AppScreen.Library
-                        scope.launch {
-                            appContainer.libraryRepository.deleteLibraryEntry(videoId)
-                        }
-                    },
-                )
-                AppScreen.Settings -> SettingsScreen(
-                    settings = settings,
-                    repository = appContainer.settingsRepository,
-                    onOpenCalibration = { navigateTo(AppScreen.Calibration) },
-                    onOpenAbout = { navigateTo(AppScreen.About) },
-                )
-                AppScreen.Renderer -> RendererScreen(
-                    settings = settings,
-                    repository = appContainer.settingsRepository,
-                )
-                AppScreen.Calibration -> CalibrationScreen(
-                    settings = settings,
-                    repository = appContainer.settingsRepository,
-                )
-                AppScreen.About -> AboutScreen(appContainer = appContainer)
+            AnimatedContent(
+                targetState = selectedScreen,
+                transitionSpec = {
+                    (
+                        fadeIn(animationSpec = tween(220)) +
+                            scaleIn(initialScale = 0.985f, animationSpec = tween(260))
+                        ).togetherWith(
+                        fadeOut(animationSpec = tween(150)) +
+                            scaleOut(targetScale = 0.995f, animationSpec = tween(150)),
+                    )
+                },
+                label = "screen-transition",
+            ) { screen ->
+                when (screen) {
+                    AppScreen.Library -> LibraryScreen(
+                        videos = videos,
+                        repository = appContainer.libraryRepository,
+                        onOpenDetails = { videoId ->
+                            selectedVideoId = videoId
+                            navigateTo(AppScreen.VideoDetails)
+                        },
+                    )
+                    AppScreen.Player -> PlayerScreen(
+                        selectedVideo = videos.firstOrNull { it.id == selectedVideoId },
+                        playbackState = playbackState,
+                        appContainer = appContainer,
+                        screenConfig = settings.cinemaScreenConfig,
+                        stereoConfig = settings.stereoConfig,
+                        vrMode = vrMode,
+                        onVrModeChanged = { vrMode = it },
+                        onBrowseLibrary = { navigateTo(AppScreen.Library) },
+                    )
+                    AppScreen.VideoDetails -> VideoDetailsScreen(
+                        video = videos.firstOrNull { it.id == selectedVideoId },
+                        playbackState = playbackState,
+                        onPlay = { video ->
+                            selectedVideoId = video.id
+                            appContainer.playerController.select(video)
+                            navigateTo(AppScreen.Player)
+                        },
+                        onDelete = { videoId ->
+                            selectedVideoId = null
+                            selectedScreen = AppScreen.Library
+                            scope.launch {
+                                appContainer.libraryRepository.deleteLibraryEntry(videoId)
+                            }
+                        },
+                    )
+                    AppScreen.Settings -> SettingsScreen(
+                        settings = settings,
+                        repository = appContainer.settingsRepository,
+                        onOpenCalibration = { navigateTo(AppScreen.Calibration) },
+                        onOpenAbout = { navigateTo(AppScreen.About) },
+                    )
+                    AppScreen.Renderer -> RendererScreen(
+                        settings = settings,
+                        repository = appContainer.settingsRepository,
+                    )
+                    AppScreen.Calibration -> CalibrationScreen(
+                        settings = settings,
+                        repository = appContainer.settingsRepository,
+                    )
+                    AppScreen.About -> AboutScreen(appContainer = appContainer)
+                }
             }
         }
     }
@@ -334,7 +360,7 @@ private fun SafetyAcknowledgementScreen(onContinue: () -> Unit) {
                     .fillMaxWidth(),
                 contentAlignment = Alignment.Center,
             ) {
-                GlassIconBadge(icon = Icons.Default.Tv, size = 112)
+                GlassIconBadge(icon = Icons.Default.Tv, size = 112, pulsing = true)
             }
             GlassPanel(modifier = Modifier.fillMaxWidth()) {
                 Text(
@@ -365,6 +391,7 @@ private fun GlassNavigationBar(
     selectedScreen: AppScreen,
     onSelect: (AppScreen) -> Unit,
 ) {
+    val haptics = LocalHapticFeedback.current
     Surface(
         modifier = Modifier
             .fillMaxWidth()
@@ -410,7 +437,10 @@ private fun GlassNavigationBar(
                             scaleX = itemScale
                             scaleY = itemScale
                         }
-                        .clickable { onSelect(screen) },
+                        .clickable {
+                            haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                            onSelect(screen)
+                        },
                     color = itemColor,
                     contentColor = if (selected) {
                         MaterialTheme.colorScheme.onSurface
@@ -497,22 +527,60 @@ private fun GlassPanel(
 private fun GlassIconBadge(
     icon: ImageVector,
     size: Int = 72,
+    pulsing: Boolean = false,
 ) {
-    Surface(
-        modifier = Modifier.size(size.dp),
-        color = Color.White.copy(alpha = 0.12f),
-        contentColor = MaterialTheme.colorScheme.onSurface,
-        shape = RoundedCornerShape((size / 3).dp),
-        border = BorderStroke(1.dp, Color.White.copy(alpha = 0.22f)),
-        shadowElevation = 12.dp,
+    val infiniteTransition = rememberInfiniteTransition(label = "glass-badge-pulse")
+    val pulseScale by infiniteTransition.animateFloat(
+        initialValue = 0.92f,
+        targetValue = 1.12f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(durationMillis = 1800),
+            repeatMode = RepeatMode.Reverse,
+        ),
+        label = "glass-badge-pulse-scale",
+    )
+    val pulseAlpha by infiniteTransition.animateFloat(
+        initialValue = 0.05f,
+        targetValue = 0.16f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(durationMillis = 1800),
+            repeatMode = RepeatMode.Reverse,
+        ),
+        label = "glass-badge-pulse-alpha",
+    )
+    Box(
+        modifier = Modifier.size((size + 18).dp),
+        contentAlignment = Alignment.Center,
     ) {
-        Box(contentAlignment = Alignment.Center) {
-            Icon(
-                imageVector = icon,
-                contentDescription = null,
-                modifier = Modifier.size((size * 0.46f).dp),
-                tint = MaterialTheme.colorScheme.onSurface,
+        if (pulsing) {
+            Box(
+                modifier = Modifier
+                    .size(size.dp)
+                    .graphicsLayer {
+                        scaleX = pulseScale
+                        scaleY = pulseScale
+                        alpha = pulseAlpha
+                    }
+                    .blur(18.dp)
+                    .background(Color.White, RoundedCornerShape((size / 3).dp)),
             )
+        }
+        Surface(
+            modifier = Modifier.size(size.dp),
+            color = Color.White.copy(alpha = 0.12f),
+            contentColor = MaterialTheme.colorScheme.onSurface,
+            shape = RoundedCornerShape((size / 3).dp),
+            border = BorderStroke(1.dp, Color.White.copy(alpha = 0.22f)),
+            shadowElevation = 12.dp,
+        ) {
+            Box(contentAlignment = Alignment.Center) {
+                Icon(
+                    imageVector = icon,
+                    contentDescription = null,
+                    modifier = Modifier.size((size * 0.46f).dp),
+                    tint = MaterialTheme.colorScheme.onSurface,
+                )
+            }
         }
     }
 }
@@ -525,6 +593,7 @@ private fun GlassPrimaryButton(
     enabled: Boolean = true,
     onClick: () -> Unit,
 ) {
+    val haptics = LocalHapticFeedback.current
     val interactionSource = remember { MutableInteractionSource() }
     val pressed by interactionSource.collectIsPressedAsState()
     val scale by animateFloatAsState(
@@ -564,7 +633,10 @@ private fun GlassPrimaryButton(
                 enabled = enabled,
                 interactionSource = interactionSource,
                 indication = null,
-                onClick = onClick,
+                onClick = {
+                    haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                    onClick()
+                },
             ),
         color = fill,
         contentColor = MaterialTheme.colorScheme.onSurface,
@@ -594,6 +666,7 @@ private fun GlassSecondaryButton(
     enabled: Boolean = true,
     onClick: () -> Unit,
 ) {
+    val haptics = LocalHapticFeedback.current
     val interactionSource = remember { MutableInteractionSource() }
     val pressed by interactionSource.collectIsPressedAsState()
     val scale by animateFloatAsState(
@@ -625,7 +698,10 @@ private fun GlassSecondaryButton(
                 enabled = enabled,
                 interactionSource = interactionSource,
                 indication = null,
-                onClick = onClick,
+                onClick = {
+                    haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                    onClick()
+                },
             ),
         color = fill,
         contentColor = MaterialTheme.colorScheme.onSurface,
@@ -1561,7 +1637,7 @@ private fun EmptyState(
         modifier = Modifier.fillMaxWidth(),
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
-        GlassIconBadge(icon = icon, size = 88)
+        GlassIconBadge(icon = icon, size = 88, pulsing = true)
         Spacer(modifier = Modifier.height(16.dp))
         Text(
             text = title,
