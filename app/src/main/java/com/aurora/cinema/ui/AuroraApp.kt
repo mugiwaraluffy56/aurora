@@ -3,6 +3,8 @@ package com.aurora.cinema.ui
 import android.net.Uri
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
@@ -12,14 +14,34 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.ChevronRight
+import androidx.compose.material.icons.filled.FolderOpen
+import androidx.compose.material.icons.filled.Forward10
+import androidx.compose.material.icons.filled.Info
+import androidx.compose.material.icons.filled.Pause
+import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.PlayCircle
+import androidx.compose.material.icons.filled.Replay10
+import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material.icons.filled.Stop
+import androidx.compose.material.icons.filled.Tune
+import androidx.compose.material.icons.filled.Tv
+import androidx.compose.material.icons.filled.VideoLibrary
 import androidx.compose.material3.Button
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
@@ -44,7 +66,9 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -101,6 +125,7 @@ private fun AuroraShell(
     settings: AppSettings,
 ) {
     var selectedScreen by rememberSaveable { mutableStateOf(AppScreen.Library) }
+    var previousScreen by rememberSaveable { mutableStateOf(AppScreen.Library) }
     var selectedVideoId by rememberSaveable { mutableStateOf<Long?>(null) }
     val videos by appContainer.libraryRepository.videos.collectAsStateWithLifecycle(initialValue = emptyList())
     val playbackState by appContainer.playerController.state.collectAsStateWithLifecycle()
@@ -123,10 +148,34 @@ private fun AuroraShell(
         }
     }
 
+    val isSecondaryScreen = selectedScreen !in primaryScreens
+
+    fun navigateTo(screen: AppScreen) {
+        if (screen != selectedScreen) {
+            previousScreen = selectedScreen
+            selectedScreen = screen
+        }
+    }
+
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text(selectedScreen.title) },
+                title = {
+                    Text(
+                        text = if (selectedScreen == AppScreen.Library) "Aurora" else selectedScreen.title,
+                        style = MaterialTheme.typography.titleLarge,
+                    )
+                },
+                navigationIcon = {
+                    if (isSecondaryScreen) {
+                        IconButton(onClick = { selectedScreen = previousScreen }) {
+                            Icon(
+                                imageVector = Icons.AutoMirrored.Filled.ArrowBack,
+                                contentDescription = "Back",
+                            )
+                        }
+                    }
+                },
                 colors = TopAppBarDefaults.topAppBarColors(
                     containerColor = MaterialTheme.colorScheme.background,
                     titleContentColor = MaterialTheme.colorScheme.onBackground,
@@ -134,15 +183,22 @@ private fun AuroraShell(
             )
         },
         bottomBar = {
-            NavigationBar(containerColor = MaterialTheme.colorScheme.surface) {
-                AppScreen.entries.forEach { screen ->
+            if (!isSecondaryScreen) {
+                NavigationBar(containerColor = MaterialTheme.colorScheme.surface) {
+                    primaryScreens.forEach { screen ->
                     NavigationBarItem(
                         selected = selectedScreen == screen,
-                        onClick = { selectedScreen = screen },
+                            onClick = { navigateTo(screen) },
                         label = { Text(screen.navLabel) },
-                        icon = { Text(screen.icon) },
+                            icon = {
+                                Icon(
+                                    imageVector = screen.icon,
+                                    contentDescription = screen.navLabel,
+                                )
+                            },
                     )
                 }
+            }
             }
         },
     ) { innerPadding ->
@@ -158,13 +214,14 @@ private fun AuroraShell(
                     repository = appContainer.libraryRepository,
                     onOpenDetails = { videoId ->
                         selectedVideoId = videoId
-                        selectedScreen = AppScreen.VideoDetails
+                        navigateTo(AppScreen.VideoDetails)
                     },
                 )
                 AppScreen.Player -> PlayerScreen(
                     selectedVideo = videos.firstOrNull { it.id == selectedVideoId },
                     playbackState = playbackState,
                     appContainer = appContainer,
+                    onBrowseLibrary = { navigateTo(AppScreen.Library) },
                 )
                 AppScreen.VideoDetails -> VideoDetailsScreen(
                     video = videos.firstOrNull { it.id == selectedVideoId },
@@ -172,7 +229,7 @@ private fun AuroraShell(
                     onPlay = { video ->
                         selectedVideoId = video.id
                         appContainer.playerController.select(video)
-                        selectedScreen = AppScreen.Player
+                        navigateTo(AppScreen.Player)
                     },
                     onDelete = { videoId ->
                         selectedVideoId = null
@@ -185,6 +242,8 @@ private fun AuroraShell(
                 AppScreen.Settings -> SettingsScreen(
                     settings = settings,
                     repository = appContainer.settingsRepository,
+                    onOpenCalibration = { navigateTo(AppScreen.Calibration) },
+                    onOpenAbout = { navigateTo(AppScreen.About) },
                 )
                 AppScreen.Renderer -> RendererScreen()
                 AppScreen.Calibration -> CalibrationScreen()
@@ -200,21 +259,46 @@ private fun SafetyAcknowledgementScreen(onContinue: () -> Unit) {
         modifier = Modifier.fillMaxSize(),
         color = MaterialTheme.colorScheme.background,
     ) {
-        ScreenColumn(verticalArrangement = Arrangement.Center) {
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(horizontal = 24.dp, vertical = 32.dp),
+        ) {
             Text(
-                text = "Aurora",
-                style = MaterialTheme.typography.displaySmall,
-                fontWeight = FontWeight.Bold,
+                text = "AURORA",
+                style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.primary,
             )
-            Spacer(modifier = Modifier.height(12.dp))
+            Box(
+                modifier = Modifier
+                    .weight(1f)
+                    .fillMaxWidth(),
+                contentAlignment = Alignment.Center,
+            ) {
+                Icon(
+                    imageVector = Icons.Default.Tv,
+                    contentDescription = null,
+                    modifier = Modifier.size(72.dp),
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
             Text(
-                text = "Use seated in a safe space. Start with short sessions, keep brightness comfortable, and stop if you feel discomfort.",
-                style = MaterialTheme.typography.titleMedium,
-                color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.78f),
+                text = "Before you begin",
+                style = MaterialTheme.typography.headlineLarge,
             )
-            Spacer(modifier = Modifier.height(28.dp))
-            Button(onClick = onContinue) {
-                Text("I understand")
+            Spacer(modifier = Modifier.height(8.dp))
+            Text(
+                text = "Use Aurora while seated in a clear space. Keep brightness comfortable and stop immediately if you feel discomfort.",
+                style = MaterialTheme.typography.bodyLarge,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            Spacer(modifier = Modifier.height(24.dp))
+            Button(
+                onClick = onContinue,
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(8.dp),
+            ) {
+                Text("Continue")
             }
         }
     }
@@ -259,16 +343,26 @@ private fun LibraryScreen(
         )
 
     ScreenColumn {
-        ScreenHeader(
-            title = "Library",
-            subtitle = "Import local videos from Android's file picker and keep them available for offline viewing.",
-        )
-        Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-            Button(onClick = { filePicker.launch(videoMimeTypes) }) {
-                Text("Import video")
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Column {
+                Text(
+                    text = "Your library",
+                    style = MaterialTheme.typography.headlineMedium,
+                )
+                Text(
+                    text = if (videos.isEmpty()) "Offline cinema, ready when you are" else "${videos.size} offline ${if (videos.size == 1) "title" else "titles"}",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
             }
-            OutlinedButton(onClick = { folderPicker.launch(null) }) {
-                Text("Import folder")
+            if (videos.isNotEmpty()) {
+                IconButton(onClick = { filePicker.launch(videoMimeTypes) }) {
+                    Icon(Icons.Default.Add, contentDescription = "Add video")
+                }
             }
         }
         if (importMessage != null) {
@@ -276,51 +370,51 @@ private fun LibraryScreen(
             Text(
                 text = importMessage.orEmpty(),
                 style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.72f),
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
         }
-        Spacer(modifier = Modifier.height(20.dp))
-        OutlinedTextField(
-            value = query,
-            onValueChange = { query = it },
-            modifier = Modifier.fillMaxWidth(),
-            singleLine = true,
-            label = { Text("Search videos") },
-        )
-        Spacer(modifier = Modifier.height(12.dp))
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            LibrarySort.entries.forEach { option ->
-                FilterChip(
-                    selected = sort == option,
-                    onClick = { sort = option },
-                    label = { Text(option.label) },
-                )
-            }
-        }
-        Spacer(modifier = Modifier.height(20.dp))
-        if (filteredVideos.isEmpty()) {
-            ActionPanel(
-                title = if (videos.isEmpty()) "No videos yet" else "No matching videos",
-                body = if (videos.isEmpty()) {
-                    "Import a video file or a folder of videos to build your offline cinema library."
-                } else {
-                    "Try a different search term."
-                },
-                actionLabel = "Refresh access",
-                onAction = {
-                    scope.launch {
-                        repository.refreshAccessChecks()
-                        importMessage = "Library access checked"
-                    }
-                },
+        Spacer(modifier = Modifier.height(24.dp))
+        if (videos.isEmpty()) {
+            EmptyLibrary(
+                onImportVideo = { filePicker.launch(videoMimeTypes) },
+                onImportFolder = { folderPicker.launch(null) },
             )
         } else {
-            filteredVideos.forEach { video ->
-                VideoListItem(
-                    video = video,
-                    onOpenDetails = { onOpenDetails(video.id) },
+            OutlinedTextField(
+                value = query,
+                onValueChange = { query = it },
+                modifier = Modifier.fillMaxWidth(),
+                singleLine = true,
+                leadingIcon = {
+                    Icon(Icons.Default.VideoLibrary, contentDescription = null)
+                },
+                placeholder = { Text("Search library") },
+            )
+            Spacer(modifier = Modifier.height(12.dp))
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                LibrarySort.entries.forEach { option ->
+                    FilterChip(
+                        selected = sort == option,
+                        onClick = { sort = option },
+                        label = { Text(option.label) },
+                    )
+                }
+            }
+            Spacer(modifier = Modifier.height(20.dp))
+            if (filteredVideos.isEmpty()) {
+                EmptyState(
+                    icon = Icons.Default.VideoLibrary,
+                    title = "No matches",
+                    body = "Try a different title or sorting option.",
                 )
-                Spacer(modifier = Modifier.height(16.dp))
+            } else {
+                filteredVideos.forEach { video ->
+                    VideoListItem(
+                        video = video,
+                        onOpenDetails = { onOpenDetails(video.id) },
+                    )
+                    Spacer(modifier = Modifier.height(8.dp))
+                }
             }
         }
     }
@@ -331,6 +425,7 @@ private fun PlayerScreen(
     selectedVideo: VideoItem?,
     playbackState: PlaybackState,
     appContainer: AppContainer,
+    onBrowseLibrary: () -> Unit,
 ) {
     val lifecycleOwner = LocalLifecycleOwner.current
     val renderEngine = remember { RenderEngine() }
@@ -364,77 +459,82 @@ private fun PlayerScreen(
         }
     }
 
-    ScreenColumn {
-        ScreenHeader(
-            title = "Player",
-            subtitle = "OpenGL-rendered playback for the selected offline video.",
-        )
+    ScreenColumn(contentPadding = 0.dp) {
+        val activeVideo = playbackState.selectedVideo ?: selectedVideo
         AndroidView(
             modifier = Modifier
                 .fillMaxWidth()
                 .aspectRatio(16 / 9f),
-            factory = { context ->
-                AuroraRenderView(context, renderEngine = renderEngine)
-            },
+            factory = { context -> AuroraRenderView(context, renderEngine = renderEngine) },
         )
-        Spacer(modifier = Modifier.height(16.dp))
-        StatusRow(label = "Selected video", value = playbackState.selectedVideo?.displayName ?: selectedVideo?.displayName ?: "No video selected")
-        StatusRow(label = "Position", value = "${playbackState.positionMs.timeLabel()} / ${playbackState.durationMs.timeLabel()}")
-        StatusRow(
-            label = "Video surface",
-            value = if (renderTelemetry.videoSurfaceAttached) "Connected" else "Waiting",
-        )
-        StatusRow(
-            label = "Video frames",
-            value = "${renderTelemetry.videoFramesPresented} presented / ${renderTelemetry.videoFramesAvailable} available",
-        )
-        if (playbackState.error != null) {
-            Text(
-                text = playbackState.error.message,
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.error,
-            )
-            Spacer(modifier = Modifier.height(12.dp))
-        }
-        Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-            Button(
-                enabled = selectedVideo != null || playbackState.selectedVideo != null,
-                onClick = {
-                    if (playbackState.selectedVideo == null && selectedVideo != null) {
-                        appContainer.playerController.select(selectedVideo)
+        Column(modifier = Modifier.padding(horizontal = 20.dp, vertical = 20.dp)) {
+            if (activeVideo == null) {
+                EmptyState(
+                    icon = Icons.Default.PlayCircle,
+                    title = "Nothing queued",
+                    body = "Choose an offline video from your library to start watching.",
+                    actionLabel = "Browse library",
+                    actionIcon = Icons.Default.VideoLibrary,
+                    onAction = onBrowseLibrary,
+                )
+            } else {
+                Text(
+                    text = activeVideo.displayName,
+                    style = MaterialTheme.typography.titleLarge,
+                    maxLines = 2,
+                )
+                Spacer(modifier = Modifier.height(4.dp))
+                Text(
+                    text = "${playbackState.positionMs.timeLabel()} / ${playbackState.durationMs.timeLabel()}",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                Slider(
+                    value = playbackState.positionMs.toFloat().coerceAtMost(playbackState.durationMs.toFloat()),
+                    onValueChange = { appContainer.playerController.seekTo(it.toLong()) },
+                    valueRange = 0f..playbackState.durationMs.coerceAtLeast(1L).toFloat(),
+                )
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceEvenly,
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    PlaybackControl(Icons.Default.Replay10, "Back 10 seconds") {
+                        appContainer.playerController.seekTo((playbackState.positionMs - 10_000L).coerceAtLeast(0L))
                     }
-                    appContainer.playerController.play()
-                },
-            ) {
-                Text("Play")
-            }
-            OutlinedButton(
-                enabled = playbackState.selectedVideo != null,
-                onClick = { appContainer.playerController.pause() },
-            ) {
-                Text("Pause")
-            }
-            OutlinedButton(
-                enabled = playbackState.selectedVideo != null,
-                onClick = { appContainer.playerController.seekTo((playbackState.positionMs - 10_000L).coerceAtLeast(0L)) },
-            ) {
-                Text("-10s")
-            }
-            OutlinedButton(
-                enabled = playbackState.selectedVideo != null,
-                onClick = { appContainer.playerController.seekTo(playbackState.positionMs + 10_000L) },
-            ) {
-                Text("+10s")
+                    PlaybackControl(
+                        icon = if (playbackState.isPlaying) Icons.Default.Pause else Icons.Default.PlayArrow,
+                        description = if (playbackState.isPlaying) "Pause" else "Play",
+                        emphasized = true,
+                    ) {
+                        if (playbackState.selectedVideo == null) {
+                            appContainer.playerController.select(activeVideo)
+                        }
+                        if (playbackState.isPlaying) appContainer.playerController.pause() else appContainer.playerController.play()
+                    }
+                    PlaybackControl(Icons.Default.Forward10, "Forward 10 seconds") {
+                        appContainer.playerController.seekTo(playbackState.positionMs + 10_000L)
+                    }
+                    PlaybackControl(Icons.Default.Stop, "Stop") {
+                        appContainer.playerController.stop()
+                    }
+                }
+                playbackState.error?.let { error ->
+                    Spacer(modifier = Modifier.height(16.dp))
+                    Text(
+                        text = error.message,
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.error,
+                    )
+                }
+                Spacer(modifier = Modifier.height(24.dp))
+                Text(
+                    text = if (renderTelemetry.videoSurfaceAttached) "Cinema surface connected" else "Preparing cinema surface",
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
             }
         }
-        Spacer(modifier = Modifier.height(12.dp))
-        OutlinedButton(
-            enabled = playbackState.selectedVideo != null,
-            onClick = { appContainer.playerController.stop() },
-        ) {
-            Text("Stop")
-        }
-        StatusRow(label = "VR entry", value = "Not connected yet")
     }
 }
 
@@ -446,18 +546,22 @@ private fun VideoDetailsScreen(
     onDelete: (Long) -> Unit,
 ) {
     ScreenColumn {
-        ScreenHeader(
-            title = "Video Details",
-            subtitle = "Selected video metadata and library access state.",
-        )
         if (video == null) {
-            Text(
-                text = "No video selected.",
-                style = MaterialTheme.typography.bodyLarge,
-                color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.72f),
+            EmptyState(
+                icon = Icons.Default.VideoLibrary,
+                title = "No video selected",
+                body = "Open a title from your library to see its media details.",
             )
         } else {
-            StatusRow(label = "Title", value = video.displayName)
+            Text(text = video.displayName, style = MaterialTheme.typography.headlineMedium)
+            Spacer(modifier = Modifier.height(4.dp))
+            Text(
+                text = "${video.durationLabel()}  ·  ${video.resolutionLabel()}",
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            Spacer(modifier = Modifier.height(24.dp))
+            SectionLabel("MEDIA")
             StatusRow(label = "Duration", value = video.durationLabel())
             StatusRow(label = "Resolution", value = video.resolutionLabel())
             StatusRow(label = "Mime type", value = video.mimeType.ifBlank { "Unknown" })
@@ -469,6 +573,8 @@ private fun VideoDetailsScreen(
             StatusRow(label = "Bitrate", value = video.probeResult.bitrate.bitrateLabel())
             StatusRow(label = "Bit depth", value = video.probeResult.bitDepth.bitDepthLabel())
             StatusRow(label = "HDR", value = video.probeResult.hdrFormat)
+            Spacer(modifier = Modifier.height(20.dp))
+            SectionLabel("LIBRARY")
             StatusRow(label = "Source", value = video.sourceType)
             StatusRow(label = "Access", value = video.accessLabel())
             StatusRow(
@@ -495,11 +601,17 @@ private fun VideoDetailsScreen(
             Button(
                 enabled = video.accessState == VideoAccessState.Available,
                 onClick = { onPlay(video) },
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(8.dp),
             ) {
                 Text("Play video")
             }
             Spacer(modifier = Modifier.height(8.dp))
-            OutlinedButton(onClick = { onDelete(video.id) }) {
+            OutlinedButton(
+                onClick = { onDelete(video.id) },
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(8.dp),
+            ) {
                 Text("Remove from library")
             }
         }
@@ -510,27 +622,31 @@ private fun VideoDetailsScreen(
 private fun SettingsScreen(
     settings: AppSettings,
     repository: AppSettingsRepository,
+    onOpenCalibration: () -> Unit,
+    onOpenAbout: () -> Unit,
 ) {
     val scope = rememberCoroutineScope()
 
     ScreenColumn {
-        ScreenHeader(
-            title = "Settings",
-            subtitle = "Persistent viewing preferences for comfort and cinema setup.",
-        )
+        SectionLabel("VIEWING")
         SettingSwitchRow(
             label = "Comfort mode",
-            body = "Keep conservative defaults for brightness, motion, and session comfort.",
+            body = "Conservative brightness and motion defaults",
             checked = settings.comfortModeEnabled,
             onCheckedChange = { enabled ->
                 scope.launch { repository.setComfortModeEnabled(enabled) }
             },
         )
+        HorizontalDivider(color = MaterialTheme.colorScheme.outline)
         Spacer(modifier = Modifier.height(20.dp))
         Text(
-            text = "Default screen distance: ${settings.defaultScreenDistanceMeters.toInt()} m",
+            text = "Screen distance",
             style = MaterialTheme.typography.titleMedium,
-            fontWeight = FontWeight.SemiBold,
+        )
+        Text(
+            text = "${settings.defaultScreenDistanceMeters.toInt()} metres",
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
         Slider(
             value = settings.defaultScreenDistanceMeters,
@@ -538,6 +654,21 @@ private fun SettingsScreen(
                 scope.launch { repository.setDefaultScreenDistanceMeters(distance) }
             },
             valueRange = 3.0f..20.0f,
+        )
+        Spacer(modifier = Modifier.height(24.dp))
+        SectionLabel("HEADSET")
+        NavigationRow(
+            icon = Icons.Default.Tune,
+            title = "Calibration",
+            subtitle = "Lens, IPD and field of view",
+            onClick = onOpenCalibration,
+        )
+        Spacer(modifier = Modifier.height(8.dp))
+        NavigationRow(
+            icon = Icons.Default.Info,
+            title = "About and diagnostics",
+            subtitle = "Device, display and decoder information",
+            onClick = onOpenAbout,
         )
     }
 }
@@ -574,9 +705,9 @@ private fun RendererScreen() {
     }
 
     ScreenColumn {
-        ScreenHeader(
-            title = "Render Diagnostics",
-            subtitle = "Custom EGL and OpenGL ES rendering foundation for the cinema surface.",
+        PageIntro(
+            title = "Cinema engine",
+            subtitle = "Live renderer health and display diagnostics.",
         )
         AndroidView(
             modifier = Modifier
@@ -596,7 +727,8 @@ private fun RendererScreen() {
             checked = diagnosticMeshEnabled,
             onCheckedChange = { diagnosticMeshEnabled = it },
         )
-        Spacer(modifier = Modifier.height(20.dp))
+        Spacer(modifier = Modifier.height(24.dp))
+        SectionLabel("LIVE TELEMETRY")
         StatusRow(label = "State", value = telemetry.state.label())
         StatusRow(
             label = "Surface",
@@ -625,9 +757,9 @@ private fun RendererScreen() {
 @Composable
 private fun CalibrationScreen() {
     ScreenColumn {
-        ScreenHeader(
-            title = "Headset Calibration",
-            subtitle = "Headset profile, IPD, FOV, and lens distortion controls will be added here.",
+        PageIntro(
+            title = "Headset profile",
+            subtitle = "Calibration controls will be enabled with the stereoscopic rendering phase.",
         )
         StatusRow(label = "Profile", value = "Default mobile headset")
         StatusRow(label = "IPD", value = "Not calibrated")
@@ -641,10 +773,11 @@ private fun AboutScreen(appContainer: AppContainer) {
     val codecs = appContainer.codecCapabilityService.summarizeDeviceCodecs()
 
     ScreenColumn {
-        ScreenHeader(
-            title = "About / Diagnostics",
-            subtitle = "App and runtime diagnostics for the Aurora cinema engine.",
+        PageIntro(
+            title = "Aurora",
+            subtitle = "Offline mobile cinema runtime diagnostics.",
         )
+        SectionLabel("APP")
         StatusRow(label = "Package", value = appContainer.applicationContext.packageName)
         StatusRow(label = "Native core", value = NativeCore.engineName())
         StatusRow(label = "App shell", value = "Ready")
@@ -657,13 +790,8 @@ private fun AboutScreen(appContainer: AppContainer) {
         if (displayInfo.refreshRate > 0f) {
             StatusRow(label = "Refresh", value = "${displayInfo.refreshRate.toInt()} Hz")
         }
-        Spacer(modifier = Modifier.height(12.dp))
-        Text(
-            text = "Video decoders",
-            style = MaterialTheme.typography.titleLarge,
-            fontWeight = FontWeight.SemiBold,
-        )
-        Spacer(modifier = Modifier.height(12.dp))
+        Spacer(modifier = Modifier.height(20.dp))
+        SectionLabel("VIDEO DECODERS")
         codecs.forEach { codec ->
             StatusRow(
                 label = codec.codecFamily,
@@ -676,60 +804,116 @@ private fun AboutScreen(appContainer: AppContainer) {
 @Composable
 private fun ScreenColumn(
     verticalArrangement: Arrangement.Vertical = Arrangement.Top,
+    contentPadding: androidx.compose.ui.unit.Dp = 20.dp,
     content: @Composable ColumnScope.() -> Unit,
 ) {
     Column(
         modifier = Modifier
             .fillMaxSize()
             .verticalScroll(rememberScrollState())
-            .padding(24.dp),
+            .padding(contentPadding),
         verticalArrangement = verticalArrangement,
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
         Column(
-            modifier = Modifier.widthIn(max = 720.dp),
+            modifier = Modifier
+                .fillMaxWidth()
+                .widthIn(max = 640.dp),
             content = content,
         )
     }
 }
 
 @Composable
-private fun ScreenHeader(title: String, subtitle: String) {
+private fun PageIntro(title: String, subtitle: String) {
     Text(
         text = title,
         style = MaterialTheme.typography.headlineMedium,
-        fontWeight = FontWeight.Bold,
     )
-    Spacer(modifier = Modifier.height(8.dp))
+    Spacer(modifier = Modifier.height(4.dp))
     Text(
         text = subtitle,
-        style = MaterialTheme.typography.bodyLarge,
-        color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.72f),
+        style = MaterialTheme.typography.bodyMedium,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
     )
     Spacer(modifier = Modifier.height(24.dp))
 }
 
 @Composable
-private fun ActionPanel(
+private fun EmptyLibrary(
+    onImportVideo: () -> Unit,
+    onImportFolder: () -> Unit,
+) {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(top = 56.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+    ) {
+        EmptyState(
+            icon = Icons.Default.VideoLibrary,
+            title = "Build your offline cinema",
+            body = "Add a local video or folder. Aurora keeps access on this device for playback without a network connection.",
+            actionLabel = "Add video",
+            onAction = onImportVideo,
+        )
+        OutlinedButton(
+            onClick = onImportFolder,
+            modifier = Modifier.fillMaxWidth(),
+            shape = RoundedCornerShape(8.dp),
+        ) {
+            Icon(Icons.Default.FolderOpen, contentDescription = null)
+            Spacer(modifier = Modifier.size(8.dp))
+            Text("Add folder")
+        }
+    }
+}
+
+@Composable
+private fun EmptyState(
+    icon: ImageVector,
     title: String,
     body: String,
-    actionLabel: String,
-    onAction: () -> Unit,
+    actionLabel: String? = null,
+    actionIcon: ImageVector = Icons.Default.Add,
+    onAction: (() -> Unit)? = null,
 ) {
-    Text(
-        text = title,
-        style = MaterialTheme.typography.titleLarge,
-        fontWeight = FontWeight.SemiBold,
-    )
-    Spacer(modifier = Modifier.height(8.dp))
-    Text(
-        text = body,
-        style = MaterialTheme.typography.bodyMedium,
-        color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.72f),
-    )
-    Spacer(modifier = Modifier.height(16.dp))
-    Button(onClick = onAction) {
-        Text(actionLabel)
+    Column(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalAlignment = Alignment.CenterHorizontally,
+    ) {
+        Icon(
+            imageVector = icon,
+            contentDescription = null,
+            modifier = Modifier.size(48.dp),
+            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        Spacer(modifier = Modifier.height(16.dp))
+        Text(
+            text = title,
+            style = MaterialTheme.typography.titleLarge,
+            textAlign = TextAlign.Center,
+        )
+        Spacer(modifier = Modifier.height(6.dp))
+        Text(
+            text = body,
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            textAlign = TextAlign.Center,
+        )
+        if (actionLabel != null && onAction != null) {
+            Spacer(modifier = Modifier.height(20.dp))
+            Button(
+                onClick = onAction,
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(8.dp),
+            ) {
+                Icon(actionIcon, contentDescription = null)
+                Spacer(modifier = Modifier.size(8.dp))
+                Text(actionLabel)
+            }
+            Spacer(modifier = Modifier.height(8.dp))
+        }
     }
 }
 
@@ -738,38 +922,43 @@ private fun VideoListItem(
     video: VideoItem,
     onOpenDetails: () -> Unit,
 ) {
-    Column(modifier = Modifier.fillMaxWidth()) {
+    Surface(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable(onClick = onOpenDetails),
+        color = MaterialTheme.colorScheme.surface,
+        shape = RoundedCornerShape(8.dp),
+    ) {
         Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceBetween,
+            modifier = Modifier.padding(16.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
+            Icon(
+                imageVector = Icons.Default.PlayCircle,
+                contentDescription = null,
+                modifier = Modifier.size(32.dp),
+                tint = MaterialTheme.colorScheme.primary,
+            )
+            Spacer(modifier = Modifier.size(12.dp))
             Column(modifier = Modifier.weight(1f)) {
                 Text(
                     text = video.displayName,
                     style = MaterialTheme.typography.titleMedium,
-                    fontWeight = FontWeight.SemiBold,
+                    maxLines = 2,
                 )
+                Spacer(modifier = Modifier.height(2.dp))
                 Text(
-                    text = "${video.durationLabel()} • ${video.resolutionLabel()} • ${video.accessLabel()}",
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.66f),
+                    text = "${video.durationLabel()}  ·  ${video.resolutionLabel()}",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
-            OutlinedButton(onClick = onOpenDetails) {
-                Text("Details")
-            }
-        }
-        if (video.accessState == VideoAccessState.Missing) {
-            Spacer(modifier = Modifier.height(8.dp))
-            Text(
-                text = "Access is missing. Re-import this file or folder to reconnect it.",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.error,
+            Icon(
+                imageVector = Icons.Default.ChevronRight,
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.onSurfaceVariant,
             )
         }
-        Spacer(modifier = Modifier.height(12.dp))
-        HorizontalDivider(color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.08f))
     }
 }
 
@@ -781,7 +970,9 @@ private fun SettingSwitchRow(
     onCheckedChange: (Boolean) -> Unit,
 ) {
     Row(
-        modifier = Modifier.fillMaxWidth(),
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(vertical = 4.dp),
         horizontalArrangement = Arrangement.SpaceBetween,
         verticalAlignment = Alignment.CenterVertically,
     ) {
@@ -793,8 +984,8 @@ private fun SettingSwitchRow(
             )
             Text(
                 text = body,
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.68f),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
         }
         Switch(
@@ -807,38 +998,114 @@ private fun SettingSwitchRow(
 @Composable
 private fun StatusRow(label: String, value: String) {
     Row(
-        modifier = Modifier.fillMaxWidth(),
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(vertical = 12.dp),
         horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.Top,
     ) {
         Text(
             text = label,
             style = MaterialTheme.typography.bodyMedium,
-            color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.64f),
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.weight(0.38f),
         )
         Text(
             text = value,
             style = MaterialTheme.typography.bodyMedium,
-            fontWeight = FontWeight.SemiBold,
+            fontWeight = FontWeight.Medium,
+            textAlign = TextAlign.End,
+            modifier = Modifier.weight(0.62f),
         )
     }
-    Spacer(modifier = Modifier.height(12.dp))
-    HorizontalDivider(color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.08f))
-    Spacer(modifier = Modifier.height(12.dp))
+    HorizontalDivider(color = MaterialTheme.colorScheme.outline)
+}
+
+@Composable
+private fun SectionLabel(text: String) {
+    Text(
+        text = text,
+        style = MaterialTheme.typography.labelMedium,
+        color = MaterialTheme.colorScheme.primary,
+    )
+    Spacer(modifier = Modifier.height(8.dp))
+}
+
+@Composable
+private fun NavigationRow(
+    icon: ImageVector,
+    title: String,
+    subtitle: String,
+    onClick: () -> Unit,
+) {
+    Surface(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable(onClick = onClick),
+        color = MaterialTheme.colorScheme.surface,
+        shape = RoundedCornerShape(8.dp),
+    ) {
+        Row(
+            modifier = Modifier.padding(16.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Icon(icon, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
+            Spacer(modifier = Modifier.size(12.dp))
+            Column(modifier = Modifier.weight(1f)) {
+                Text(title, style = MaterialTheme.typography.titleMedium)
+                Text(
+                    subtitle,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            Icon(
+                Icons.Default.ChevronRight,
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+    }
+}
+
+@Composable
+private fun PlaybackControl(
+    icon: ImageVector,
+    description: String,
+    emphasized: Boolean = false,
+    onClick: () -> Unit,
+) {
+    Surface(
+        color = if (emphasized) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surface,
+        contentColor = if (emphasized) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurface,
+        shape = RoundedCornerShape(8.dp),
+    ) {
+        IconButton(onClick = onClick) {
+            Icon(icon, contentDescription = description)
+        }
+    }
 }
 
 private enum class AppScreen(
     val title: String,
     val navLabel: String,
-    val icon: String,
+    val icon: ImageVector,
 ) {
-    Library("Library", "Library", "L"),
-    Player("Player", "Player", "P"),
-    VideoDetails("Video Details", "Details", "D"),
-    Settings("Settings", "Settings", "S"),
-    Renderer("Render Diagnostics", "Render", "R"),
-    Calibration("Headset Calibration", "Calibrate", "C"),
-    About("About / Diagnostics", "About", "A"),
+    Library("Library", "Library", Icons.Default.VideoLibrary),
+    Player("Player", "Player", Icons.Default.PlayCircle),
+    Renderer("Cinema", "Cinema", Icons.Default.Tv),
+    Settings("Settings", "Settings", Icons.Default.Settings),
+    VideoDetails("Video details", "Details", Icons.Default.Info),
+    Calibration("Calibration", "Calibration", Icons.Default.Tune),
+    About("About", "About", Icons.Default.Info),
 }
+
+private val primaryScreens = listOf(
+    AppScreen.Library,
+    AppScreen.Player,
+    AppScreen.Renderer,
+    AppScreen.Settings,
+)
 
 private fun RenderState.label(): String {
     return name.replaceFirstChar { character ->

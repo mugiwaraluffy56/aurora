@@ -6,10 +6,14 @@ import androidx.compose.runtime.Composable
 
 private val AuroraColorScheme = darkColorScheme(
     primary = AuroraPrimary,
+    onPrimary = AuroraOnPrimary,
     background = AuroraBlack,
     surface = AuroraSurface,
+    surfaceVariant = AuroraSurfaceRaised,
     onBackground = AuroraOnDark,
     onSurface = AuroraOnDark,
+    onSurfaceVariant = AuroraMuted,
+    outline = AuroraOutline,
 )
 
 @Composable
