@@ -144,6 +144,7 @@ import com.aurora.cinema.ui.theme.AuroraGlass
 import com.aurora.cinema.ui.theme.AuroraControlTrack
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
 @Composable
@@ -962,6 +963,7 @@ private fun PlayerScreen(
     val renderEngine = remember { RenderEngine() }
     val renderTelemetry by renderEngine.telemetry.collectAsStateWithLifecycle()
     val videoSurface by renderEngine.videoSurface.collectAsStateWithLifecycle()
+    val scope = rememberCoroutineScope()
     var headPose by remember { mutableStateOf(HeadPose()) }
     val headTracker = remember(context, renderEngine) {
         AndroidHeadTracker(context.applicationContext) { pose ->
@@ -1041,10 +1043,140 @@ private fun PlayerScreen(
 
     val activeVideo = playbackState.selectedVideo ?: selectedVideo
     if (vrMode) {
+        val dwellSelector = remember { VrDwellSelector() }
+        var dwellSelection by remember { mutableStateOf(DwellSelection()) }
+        var vrOverlayVisible by rememberSaveable { mutableStateOf(true) }
+        var vrControlsLocked by rememberSaveable { mutableStateOf(false) }
+        var vrScreenConfig by remember { mutableStateOf(screenConfig) }
+        LaunchedEffect(screenConfig) {
+            vrScreenConfig = screenConfig
+        }
+        fun executeGazeTarget(target: VrGazeTarget) {
+            when (target) {
+                VrGazeTarget.Back -> appContainer.playerController.seekTo(
+                    (playbackState.positionMs - 10_000L).coerceAtLeast(0L),
+                )
+                VrGazeTarget.PlayPause -> {
+                    if (activeVideo != null && playbackState.selectedVideo == null) {
+                        appContainer.playerController.select(activeVideo)
+                    }
+                    if (playbackState.isPlaying) {
+                        appContainer.playerController.pause()
+                    } else {
+                        appContainer.playerController.play()
+                    }
+                }
+                VrGazeTarget.Forward -> appContainer.playerController.seekTo(playbackState.positionMs + 10_000L)
+                VrGazeTarget.Timeline -> {
+                    val midpoint = playbackState.durationMs / 2L
+                    if (midpoint > 0L) appContainer.playerController.seekTo(midpoint)
+                }
+                VrGazeTarget.Recenter -> if (headTracker.available) headTracker.recenter() else renderEngine.recenter()
+                VrGazeTarget.ScreenSmaller -> {
+                    vrScreenConfig = vrScreenConfig.copy(widthMeters = (vrScreenConfig.widthMeters - 1f).coerceAtLeast(6f))
+                    scope.launch { appContainer.settingsRepository.setCinemaScreenConfig(vrScreenConfig) }
+                }
+                VrGazeTarget.ScreenLarger -> {
+                    vrScreenConfig = vrScreenConfig.copy(widthMeters = (vrScreenConfig.widthMeters + 1f).coerceAtMost(30f))
+                    scope.launch { appContainer.settingsRepository.setCinemaScreenConfig(vrScreenConfig) }
+                }
+                VrGazeTarget.LockControls -> vrControlsLocked = !vrControlsLocked
+                VrGazeTarget.Exit -> onVrModeChanged(false)
+                VrGazeTarget.None -> Unit
+            }
+        }
+        LaunchedEffect(vrMode, headPose.tracking, vrControlsLocked, vrOverlayVisible) {
+            while (vrMode) {
+                val target = if (vrControlsLocked || !vrOverlayVisible) {
+                    VrGazeTarget.None
+                } else {
+                    VrGazeMapper.targetFromViewMatrix(headPose.viewMatrix)
+                }
+                val nextSelection = dwellSelector.update(target, System.currentTimeMillis())
+                dwellSelection = nextSelection
+                if (nextSelection.fired != VrGazeTarget.None) {
+                    executeGazeTarget(nextSelection.fired)
+                }
+                delay(100L)
+            }
+        }
         Box(modifier = Modifier.fillMaxSize()) {
             AndroidView(
                 modifier = Modifier.fillMaxSize(),
                 factory = { context -> AuroraRenderView(context, renderEngine = renderEngine) },
+            )
+            if (vrOverlayVisible) {
+                Column(
+                    modifier = Modifier
+                        .align(Alignment.Center)
+                        .padding(20.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.spacedBy(14.dp),
+                ) {
+                    Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                        VrGazeButton(
+                            target = VrGazeTarget.Back,
+                            active = dwellSelection.target == VrGazeTarget.Back,
+                            progress = dwellSelection.progress,
+                            icon = Icons.Default.Replay10,
+                            label = "Back",
+                            onClick = { executeGazeTarget(VrGazeTarget.Back) },
+                        )
+                        VrGazeButton(
+                            target = VrGazeTarget.PlayPause,
+                            active = dwellSelection.target == VrGazeTarget.PlayPause,
+                            progress = dwellSelection.progress,
+                            icon = if (playbackState.isPlaying) Icons.Default.Pause else Icons.Default.PlayArrow,
+                            label = if (playbackState.isPlaying) "Pause" else "Play",
+                            onClick = { executeGazeTarget(VrGazeTarget.PlayPause) },
+                        )
+                        VrGazeButton(
+                            target = VrGazeTarget.Forward,
+                            active = dwellSelection.target == VrGazeTarget.Forward,
+                            progress = dwellSelection.progress,
+                            icon = Icons.Default.Forward10,
+                            label = "Forward",
+                            onClick = { executeGazeTarget(VrGazeTarget.Forward) },
+                        )
+                    }
+                    Text(
+                        text = "${playbackState.positionMs.timeLabel()} / ${playbackState.durationMs.timeLabel()}",
+                        color = Color.White,
+                        style = MaterialTheme.typography.labelMedium,
+                    )
+                    Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                        VrGazeButton(
+                            target = VrGazeTarget.ScreenSmaller,
+                            active = dwellSelection.target == VrGazeTarget.ScreenSmaller,
+                            progress = dwellSelection.progress,
+                            icon = Icons.Default.Tv,
+                            label = "Smaller",
+                            onClick = { executeGazeTarget(VrGazeTarget.ScreenSmaller) },
+                        )
+                        VrGazeButton(
+                            target = VrGazeTarget.Timeline,
+                            active = dwellSelection.target == VrGazeTarget.Timeline,
+                            progress = dwellSelection.progress,
+                            icon = Icons.Default.PlayCircle,
+                            label = "Middle",
+                            onClick = { executeGazeTarget(VrGazeTarget.Timeline) },
+                        )
+                        VrGazeButton(
+                            target = VrGazeTarget.ScreenLarger,
+                            active = dwellSelection.target == VrGazeTarget.ScreenLarger,
+                            progress = dwellSelection.progress,
+                            icon = Icons.Default.Fullscreen,
+                            label = "Larger",
+                            onClick = { executeGazeTarget(VrGazeTarget.ScreenLarger) },
+                        )
+                    }
+                }
+            }
+            Box(
+                modifier = Modifier
+                    .align(Alignment.Center)
+                    .size(10.dp)
+                    .background(Color.White.copy(alpha = if (vrControlsLocked) 0.22f else 0.72f), CircleShape),
             )
             Row(
                 modifier = Modifier
@@ -1052,24 +1184,30 @@ private fun PlayerScreen(
                     .padding(16.dp),
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
             ) {
-                Surface(
-                    color = MaterialTheme.colorScheme.surface.copy(alpha = 0.82f),
-                    shape = RoundedCornerShape(14.dp),
-                ) {
-                    IconButton(onClick = {
-                        if (headTracker.available) headTracker.recenter() else renderEngine.recenter()
-                    }) {
-                        Icon(Icons.Default.CenterFocusStrong, contentDescription = "Recenter view")
-                    }
-                }
-                Surface(
-                    color = MaterialTheme.colorScheme.surface.copy(alpha = 0.82f),
-                    shape = RoundedCornerShape(14.dp),
-                ) {
-                    IconButton(onClick = { onVrModeChanged(false) }) {
-                        Icon(Icons.Default.Close, contentDescription = "Exit VR")
-                    }
-                }
+                VrGazeButton(
+                    target = VrGazeTarget.Recenter,
+                    active = dwellSelection.target == VrGazeTarget.Recenter,
+                    progress = dwellSelection.progress,
+                    icon = Icons.Default.CenterFocusStrong,
+                    label = "Recenter",
+                    onClick = { executeGazeTarget(VrGazeTarget.Recenter) },
+                )
+                VrGazeButton(
+                    target = VrGazeTarget.LockControls,
+                    active = dwellSelection.target == VrGazeTarget.LockControls,
+                    progress = dwellSelection.progress,
+                    icon = Icons.Default.Settings,
+                    label = if (vrControlsLocked) "Unlock" else "Lock",
+                    onClick = { executeGazeTarget(VrGazeTarget.LockControls) },
+                )
+                VrGazeButton(
+                    target = VrGazeTarget.Exit,
+                    active = dwellSelection.target == VrGazeTarget.Exit,
+                    progress = dwellSelection.progress,
+                    icon = Icons.Default.Close,
+                    label = "Exit",
+                    onClick = { executeGazeTarget(VrGazeTarget.Exit) },
+                )
             }
             Surface(
                 modifier = Modifier
@@ -1079,7 +1217,13 @@ private fun PlayerScreen(
                 shape = RoundedCornerShape(14.dp),
             ) {
                 Text(
-                    text = if (headPose.tracking) "Head tracking active" else headPose.sensorName,
+                    text = if (vrControlsLocked) {
+                        "Controls locked"
+                    } else if (headPose.tracking) {
+                        "Gaze ${dwellSelection.target.name.lowercase()} ${(dwellSelection.progress * 100).toInt()}%"
+                    } else {
+                        headPose.sensorName
+                    },
                     modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp),
                     style = MaterialTheme.typography.labelMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -2084,6 +2228,52 @@ private fun PlaybackControl(
     ) {
         IconButton(onClick = onClick) {
             Icon(icon, contentDescription = description)
+        }
+    }
+}
+
+@Composable
+private fun VrGazeButton(
+    target: VrGazeTarget,
+    active: Boolean,
+    progress: Float,
+    icon: ImageVector,
+    label: String,
+    onClick: () -> Unit,
+) {
+    val semanticLabel = "${target.name}: $label"
+    Surface(
+        modifier = Modifier.widthIn(min = 82.dp),
+        color = MaterialTheme.colorScheme.surface.copy(alpha = if (active) 0.9f else 0.72f),
+        contentColor = MaterialTheme.colorScheme.onSurface,
+        shape = RoundedCornerShape(14.dp),
+        border = BorderStroke(
+            width = 1.dp,
+            color = MaterialTheme.colorScheme.primary.copy(alpha = if (active) 0.95f else 0.22f),
+        ),
+    ) {
+        Column(
+            modifier = Modifier
+                .clickable(onClick = onClick)
+                .padding(horizontal = 12.dp, vertical = 10.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.spacedBy(4.dp),
+        ) {
+            Icon(icon, contentDescription = semanticLabel, modifier = Modifier.size(24.dp))
+            Text(text = label, style = MaterialTheme.typography.labelSmall)
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(3.dp)
+                    .background(MaterialTheme.colorScheme.outline.copy(alpha = 0.18f), RoundedCornerShape(8.dp)),
+            ) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth(progress.coerceIn(0f, 1f))
+                        .height(3.dp)
+                        .background(MaterialTheme.colorScheme.primary, RoundedCornerShape(8.dp)),
+                )
+            }
         }
     }
 }
