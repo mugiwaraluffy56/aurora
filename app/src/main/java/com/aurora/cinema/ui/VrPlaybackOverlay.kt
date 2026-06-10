@@ -43,6 +43,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import com.aurora.cinema.playback.SubtitleSettings
 import kotlinx.coroutines.delay
 
 @Composable
@@ -52,6 +54,8 @@ fun VrPlaybackOverlay(
     sensorName: String,
     isPlaying: Boolean,
     progressLabel: String,
+    subtitleText: String,
+    subtitleSettings: SubtitleSettings,
     controlsLocked: Boolean,
     onControlsLockedChange: (Boolean) -> Unit,
     onTarget: (VrGazeTarget) -> Unit,
@@ -89,6 +93,10 @@ fun VrPlaybackOverlay(
             )
         }
         VrGazeCursor(locked = controlsLocked)
+        VrSubtitleLayer(
+            subtitleText = subtitleText,
+            settings = subtitleSettings,
+        )
         VrSystemControls(
             controlsLocked = controlsLocked,
             dwellSelection = dwellSelection,
@@ -104,6 +112,33 @@ fun VrPlaybackOverlay(
             sensorName = sensorName,
             controlsLocked = controlsLocked,
             selection = dwellSelection,
+        )
+    }
+}
+
+@Composable
+private fun BoxScope.VrSubtitleLayer(
+    subtitleText: String,
+    settings: SubtitleSettings,
+) {
+    if (!settings.enabled || subtitleText.isBlank()) return
+    Surface(
+        modifier = Modifier
+            .align(Alignment.BottomCenter)
+            .padding(
+                start = 24.dp,
+                end = 24.dp,
+                bottom = (92 + (settings.verticalOffset * 120f).toInt()).dp,
+            )
+            .widthIn(max = 720.dp),
+        color = Color.Black.copy(alpha = 0.62f),
+        shape = RoundedCornerShape(12.dp),
+    ) {
+        Text(
+            text = subtitleText,
+            modifier = Modifier.padding(horizontal = 18.dp, vertical = 10.dp),
+            color = Color.White,
+            style = MaterialTheme.typography.bodyLarge.copy(fontSize = (20f * settings.sizeScale).sp),
         )
     }
 }

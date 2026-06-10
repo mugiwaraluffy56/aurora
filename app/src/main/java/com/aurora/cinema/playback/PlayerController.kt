@@ -22,4 +22,6 @@ interface PlayerController {
     fun saveProgress()
 
     fun setVideoSurface(surface: Surface?)
+
+    fun setSubtitleSettings(settings: SubtitleSettings)
 }

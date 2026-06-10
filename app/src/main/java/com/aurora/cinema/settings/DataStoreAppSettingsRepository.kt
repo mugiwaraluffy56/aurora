@@ -8,6 +8,7 @@ import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.floatPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
+import com.aurora.cinema.playback.SubtitleSettings
 import com.aurora.cinema.render.CinemaScreenConfig
 import com.aurora.cinema.render.HeadsetProfile
 import com.aurora.cinema.render.ScreenAspectRatio
@@ -75,6 +76,13 @@ class DataStoreAppSettingsRepository(
                     chromaticAberrationRed = preferences[Keys.chromaticAberrationRed] ?: 0f,
                     chromaticAberrationBlue = preferences[Keys.chromaticAberrationBlue] ?: 0f,
                 ).clamped(),
+                subtitleSettings = SubtitleSettings(
+                    enabled = preferences[Keys.subtitlesEnabled] ?: true,
+                    sizeScale = preferences[Keys.subtitleSizeScale] ?: 1f,
+                    verticalOffset = preferences[Keys.subtitleVerticalOffset] ?: 0f,
+                    depthMeters = preferences[Keys.subtitleDepth] ?: 6f,
+                    audioDelayMs = (preferences[Keys.audioDelayMs] ?: 0f).toLong(),
+                ).clamped(),
             )
         }
 
@@ -137,6 +145,17 @@ class DataStoreAppSettingsRepository(
         }
     }
 
+    override suspend fun setSubtitleSettings(settings: SubtitleSettings) {
+        val clamped = settings.clamped()
+        dataStore.edit { preferences ->
+            preferences[Keys.subtitlesEnabled] = clamped.enabled
+            preferences[Keys.subtitleSizeScale] = clamped.sizeScale
+            preferences[Keys.subtitleVerticalOffset] = clamped.verticalOffset
+            preferences[Keys.subtitleDepth] = clamped.depthMeters
+            preferences[Keys.audioDelayMs] = clamped.audioDelayMs.toFloat()
+        }
+    }
+
     private object Keys {
         val firstRunAcknowledged = booleanPreferencesKey("first_run_acknowledged")
         val comfortModeEnabled = booleanPreferencesKey("comfort_mode_enabled")
@@ -166,6 +185,11 @@ class DataStoreAppSettingsRepository(
         val distortionK3 = floatPreferencesKey("distortion_k3")
         val chromaticAberrationRed = floatPreferencesKey("chromatic_aberration_red")
         val chromaticAberrationBlue = floatPreferencesKey("chromatic_aberration_blue")
+        val subtitlesEnabled = booleanPreferencesKey("subtitles_enabled")
+        val subtitleSizeScale = floatPreferencesKey("subtitle_size_scale")
+        val subtitleVerticalOffset = floatPreferencesKey("subtitle_vertical_offset")
+        val subtitleDepth = floatPreferencesKey("subtitle_depth")
+        val audioDelayMs = floatPreferencesKey("audio_delay_ms")
     }
 }
 

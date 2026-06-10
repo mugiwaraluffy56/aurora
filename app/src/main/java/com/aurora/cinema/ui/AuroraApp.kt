@@ -127,6 +127,8 @@ import com.aurora.cinema.library.VideoAccessState
 import com.aurora.cinema.library.VideoItem
 import com.aurora.cinema.media.CodecSupportStatus
 import com.aurora.cinema.playback.PlaybackState
+import com.aurora.cinema.playback.SubtitleSettings
+import com.aurora.cinema.playback.TimedTextTrack
 import com.aurora.cinema.render.AuroraRenderView
 import com.aurora.cinema.render.CinemaScreenConfig
 import com.aurora.cinema.render.RenderEngine
@@ -293,6 +295,7 @@ private fun AuroraShell(
                         appContainer = appContainer,
                         screenConfig = settings.cinemaScreenConfig,
                         stereoConfig = settings.stereoConfig,
+                        subtitleSettings = settings.subtitleSettings,
                         comfortModeEnabled = settings.comfortModeEnabled,
                         vrMode = vrMode,
                         onVrModeChanged = { vrMode = it },
@@ -962,6 +965,7 @@ private fun PlayerScreen(
     appContainer: AppContainer,
     screenConfig: CinemaScreenConfig,
     stereoConfig: StereoConfig,
+    subtitleSettings: SubtitleSettings,
     comfortModeEnabled: Boolean,
     vrMode: Boolean,
     onVrModeChanged: (Boolean) -> Unit,
@@ -1026,6 +1030,10 @@ private fun PlayerScreen(
 
     LaunchedEffect(stereoConfig, vrMode) {
         renderEngine.setStereoConfig(stereoConfig.copy(enabled = vrMode))
+    }
+
+    LaunchedEffect(subtitleSettings) {
+        appContainer.playerController.setSubtitleSettings(subtitleSettings)
     }
 
     LaunchedEffect(vrMode) {
@@ -1135,6 +1143,8 @@ private fun PlayerScreen(
                 sensorName = headPose.sensorName,
                 isPlaying = playbackState.isPlaying,
                 progressLabel = "${playbackState.positionMs.timeLabel()} / ${playbackState.durationMs.timeLabel()}",
+                subtitleText = playbackState.subtitleText,
+                subtitleSettings = subtitleSettings,
                 controlsLocked = vrControlsLocked,
                 onControlsLockedChange = { vrControlsLocked = it },
                 onTarget = ::executeGazeTarget,
@@ -1223,6 +1233,14 @@ private fun PlayerScreen(
                         appContainer.playerController.stop()
                     }
                 }
+                Spacer(modifier = Modifier.height(24.dp))
+                SubtitleControls(
+                    settings = subtitleSettings,
+                    tracks = playbackState.timedTextTracks,
+                    onSettingsChanged = { next ->
+                        scope.launch { appContainer.settingsRepository.setSubtitleSettings(next) }
+                    },
+                )
                 playbackState.error?.let { error ->
                     Spacer(modifier = Modifier.height(16.dp))
                     Text(
@@ -2114,6 +2132,62 @@ private fun CinemaConfigSlider(
 }
 
 @Composable
+private fun SubtitleControls(
+    settings: SubtitleSettings,
+    tracks: List<TimedTextTrack>,
+    onSettingsChanged: (SubtitleSettings) -> Unit,
+) {
+    var draft by remember(settings) { mutableStateOf(settings) }
+
+    SectionLabel("SUBTITLES AND AUDIO")
+    SettingSwitchRow(
+        label = "Subtitles",
+        body = if (tracks.isEmpty()) {
+            "No embedded subtitle tracks detected for the current video."
+        } else {
+            tracks.joinToString { track -> track.label }
+        },
+        checked = draft.enabled,
+        onCheckedChange = {
+            draft = draft.copy(enabled = it)
+            onSettingsChanged(draft)
+        },
+    )
+    CinemaConfigSlider(
+        label = "Subtitle size",
+        valueLabel = "${(draft.sizeScale * 100).toInt()}%",
+        value = draft.sizeScale,
+        range = 0.6f..1.8f,
+        onValueChange = { draft = draft.copy(sizeScale = it) },
+        onValueChangeFinished = { onSettingsChanged(draft) },
+    )
+    CinemaConfigSlider(
+        label = "Subtitle height",
+        valueLabel = "%.2f".format(draft.verticalOffset),
+        value = draft.verticalOffset,
+        range = -0.35f..0.35f,
+        onValueChange = { draft = draft.copy(verticalOffset = it) },
+        onValueChangeFinished = { onSettingsChanged(draft) },
+    )
+    CinemaConfigSlider(
+        label = "Subtitle depth",
+        valueLabel = "%.1f m".format(draft.depthMeters),
+        value = draft.depthMeters,
+        range = 3f..12f,
+        onValueChange = { draft = draft.copy(depthMeters = it) },
+        onValueChangeFinished = { onSettingsChanged(draft) },
+    )
+    CinemaConfigSlider(
+        label = "Audio delay",
+        valueLabel = "${draft.audioDelayMs} ms",
+        value = draft.audioDelayMs.toFloat(),
+        range = -1000f..1000f,
+        onValueChange = { draft = draft.copy(audioDelayMs = it.toLong()) },
+        onValueChangeFinished = { onSettingsChanged(draft) },
+    )
+}
+
+@Composable
 private fun glassSliderColors() = SliderDefaults.colors(
     thumbColor = MaterialTheme.colorScheme.primary,
     activeTrackColor = MaterialTheme.colorScheme.primary,
@@ -2384,6 +2458,8 @@ private fun AuroraAppPreview() {
                     override fun saveProgress() = Unit
 
                     override fun setVideoSurface(surface: android.view.Surface?) = Unit
+
+                    override fun setSubtitleSettings(settings: SubtitleSettings) = Unit
                 }
                 override val mediaSessionController: com.aurora.cinema.playback.MediaSessionController
                     get() = error("Preview does not create a media session")
@@ -2405,6 +2481,8 @@ private fun AuroraAppPreview() {
                     override suspend fun setStereoConfig(config: StereoConfig) = Unit
 
                     override suspend fun setHeadsetProfile(profile: com.aurora.cinema.render.HeadsetProfile) = Unit
+
+                    override suspend fun setSubtitleSettings(settings: SubtitleSettings) = Unit
                 }
             },
         )

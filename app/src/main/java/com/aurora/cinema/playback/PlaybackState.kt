@@ -13,4 +13,5 @@ data class PlaybackState(
     val videoHeight: Int = 0,
     val error: PlaybackError? = null,
     val timedTextTracks: List<TimedTextTrack> = emptyList(),
+    val subtitleText: String = "",
 )

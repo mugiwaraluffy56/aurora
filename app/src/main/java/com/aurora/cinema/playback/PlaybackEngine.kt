@@ -5,9 +5,12 @@ import android.content.Intent
 import android.net.Uri
 import android.view.Surface
 import androidx.media3.common.AudioAttributes
+import androidx.media3.common.C
 import androidx.media3.common.MediaItem
 import androidx.media3.common.Player
+import androidx.media3.common.Tracks
 import androidx.media3.common.VideoSize
+import androidx.media3.common.text.CueGroup
 import androidx.media3.exoplayer.ExoPlayer
 import com.aurora.cinema.library.VideoItem
 import kotlinx.coroutines.CoroutineScope
@@ -31,6 +34,9 @@ class PlaybackEngine(
     override val mediaPlayer: Player = player
 
     private var selectedVideo: VideoItem? = null
+    private var subtitleSettings = SubtitleSettings()
+    private var latestSubtitleText = ""
+    private var latestTextTracks: List<TimedTextTrack> = emptyList()
 
     init {
         player.setAudioAttributes(AudioAttributes.DEFAULT, true)
@@ -65,6 +71,33 @@ class PlaybackEngine(
                         videoWidth = displaySize.width,
                         videoHeight = displaySize.height,
                     )
+                }
+
+                override fun onTracksChanged(tracks: Tracks) {
+                    latestTextTracks = tracks.groups
+                        .filter { group -> group.type == C.TRACK_TYPE_TEXT }
+                        .flatMapIndexed { groupIndex, group ->
+                            List(group.length) { trackIndex ->
+                                val format = group.getTrackFormat(trackIndex)
+                                TimedTextTrack(
+                                    id = "$groupIndex:$trackIndex",
+                                    label = format.label ?: format.language ?: "Subtitle ${trackIndex + 1}",
+                                    language = format.language,
+                                )
+                            }
+                        }
+                    syncState()
+                }
+
+                override fun onCues(cueGroup: CueGroup) {
+                    latestSubtitleText = if (subtitleSettings.enabled) {
+                        cueGroup.cues.joinToString(separator = "\n") { cue ->
+                            cue.text?.toString().orEmpty()
+                        }.trim()
+                    } else {
+                        ""
+                    }
+                    syncState()
                 }
             },
         )
@@ -142,6 +175,14 @@ class PlaybackEngine(
         player.setVideoSurface(surface)
     }
 
+    override fun setSubtitleSettings(settings: SubtitleSettings) {
+        subtitleSettings = settings.clamped()
+        if (!subtitleSettings.enabled) {
+            latestSubtitleText = ""
+        }
+        syncState()
+    }
+
     private fun syncState() {
         val video = selectedVideo
         mutableState.value = mutableState.value.copy(
@@ -151,6 +192,8 @@ class PlaybackEngine(
             durationMs = player.duration.takeIf { it > 0L } ?: video?.durationMs ?: 0L,
             positionMs = player.currentPosition.coerceAtLeast(0L),
             bufferedPositionMs = player.bufferedPosition.coerceAtLeast(0L),
+            timedTextTracks = latestTextTracks,
+            subtitleText = latestSubtitleText,
         )
     }
 
