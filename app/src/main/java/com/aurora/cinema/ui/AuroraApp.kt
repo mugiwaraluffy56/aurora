@@ -10,10 +10,14 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.spring
+import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxScope
 import androidx.compose.foundation.layout.Arrangement
@@ -54,7 +58,6 @@ import androidx.compose.material.icons.filled.Stop
 import androidx.compose.material.icons.filled.Tune
 import androidx.compose.material.icons.filled.Tv
 import androidx.compose.material.icons.filled.VideoLibrary
-import androidx.compose.material3.Button
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.FilterChipDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -62,7 +65,6 @@ import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Slider
@@ -73,7 +75,6 @@ import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
-import androidx.compose.material3.ButtonDefaults
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
@@ -521,18 +522,51 @@ private fun GlassPrimaryButton(
     label: String,
     modifier: Modifier = Modifier,
     icon: ImageVector? = null,
+    enabled: Boolean = true,
     onClick: () -> Unit,
 ) {
+    val interactionSource = remember { MutableInteractionSource() }
+    val pressed by interactionSource.collectIsPressedAsState()
+    val scale by animateFloatAsState(
+        targetValue = if (pressed && enabled) 0.965f else 1f,
+        animationSpec = spring(
+            dampingRatio = Spring.DampingRatioMediumBouncy,
+            stiffness = Spring.StiffnessMediumLow,
+        ),
+        label = "glass-primary-scale",
+    )
     val lift by animateDpAsState(
-        targetValue = 10.dp,
-        animationSpec = tween(durationMillis = 260),
+        targetValue = if (pressed && enabled) 4.dp else 12.dp,
+        animationSpec = spring(
+            dampingRatio = Spring.DampingRatioNoBouncy,
+            stiffness = Spring.StiffnessMedium,
+        ),
         label = "glass-primary-lift",
+    )
+    val fill by animateColorAsState(
+        targetValue = if (pressed && enabled) {
+            Color.White.copy(alpha = 0.22f)
+        } else {
+            Color.White.copy(alpha = 0.16f)
+        },
+        animationSpec = tween(durationMillis = 180),
+        label = "glass-primary-fill",
     )
     Surface(
         modifier = modifier
             .heightIn(min = 56.dp)
-            .clickable(onClick = onClick),
-        color = Color.White.copy(alpha = 0.16f),
+            .graphicsLayer {
+                scaleX = scale
+                scaleY = scale
+                alpha = if (enabled) 1f else 0.42f
+            }
+            .clickable(
+                enabled = enabled,
+                interactionSource = interactionSource,
+                indication = null,
+                onClick = onClick,
+            ),
+        color = fill,
         contentColor = MaterialTheme.colorScheme.onSurface,
         shape = RoundedCornerShape(28.dp),
         border = BorderStroke(1.dp, Color.White.copy(alpha = 0.30f)),
@@ -557,13 +591,43 @@ private fun GlassSecondaryButton(
     label: String,
     modifier: Modifier = Modifier,
     icon: ImageVector? = null,
+    enabled: Boolean = true,
     onClick: () -> Unit,
 ) {
+    val interactionSource = remember { MutableInteractionSource() }
+    val pressed by interactionSource.collectIsPressedAsState()
+    val scale by animateFloatAsState(
+        targetValue = if (pressed && enabled) 0.965f else 1f,
+        animationSpec = spring(
+            dampingRatio = Spring.DampingRatioMediumBouncy,
+            stiffness = Spring.StiffnessMediumLow,
+        ),
+        label = "glass-secondary-scale",
+    )
+    val fill by animateColorAsState(
+        targetValue = if (pressed && enabled) {
+            Color.White.copy(alpha = 0.14f)
+        } else {
+            Color.White.copy(alpha = 0.08f)
+        },
+        animationSpec = tween(durationMillis = 180),
+        label = "glass-secondary-fill",
+    )
     Surface(
         modifier = modifier
             .heightIn(min = 56.dp)
-            .clickable(onClick = onClick),
-        color = Color.White.copy(alpha = 0.08f),
+            .graphicsLayer {
+                scaleX = scale
+                scaleY = scale
+                alpha = if (enabled) 1f else 0.42f
+            }
+            .clickable(
+                enabled = enabled,
+                interactionSource = interactionSource,
+                indication = null,
+                onClick = onClick,
+            ),
+        color = fill,
         contentColor = MaterialTheme.colorScheme.onSurface,
         shape = RoundedCornerShape(28.dp),
         border = BorderStroke(1.dp, Color.White.copy(alpha = 0.18f)),
@@ -857,15 +921,12 @@ private fun PlayerScreen(
                     actionIcon = Icons.Default.VideoLibrary,
                     onAction = onBrowseLibrary,
                 )
-                OutlinedButton(
+                GlassSecondaryButton(
+                    label = "Enter VR preview",
+                    icon = Icons.Default.Fullscreen,
                     onClick = { onVrModeChanged(true) },
                     modifier = Modifier.fillMaxWidth(),
-                    shape = RoundedCornerShape(12.dp),
-                ) {
-                    Icon(Icons.Default.Fullscreen, contentDescription = null)
-                    Spacer(modifier = Modifier.size(8.dp))
-                    Text("Enter VR preview")
-                }
+                )
             } else {
                 Text(
                     text = activeVideo.displayName,
@@ -917,19 +978,12 @@ private fun PlayerScreen(
                     )
                 }
                 Spacer(modifier = Modifier.height(24.dp))
-                Button(
+                GlassPrimaryButton(
+                    label = "Enter VR",
+                    icon = Icons.Default.Fullscreen,
                     onClick = { onVrModeChanged(true) },
                     modifier = Modifier.fillMaxWidth(),
-                    shape = RoundedCornerShape(12.dp),
-                    colors = ButtonDefaults.buttonColors(
-                        containerColor = MaterialTheme.colorScheme.primary,
-                        contentColor = MaterialTheme.colorScheme.onPrimary,
-                    ),
-                ) {
-                    Icon(Icons.Default.Fullscreen, contentDescription = null)
-                    Spacer(modifier = Modifier.size(8.dp))
-                    Text("Enter VR")
-                }
+                )
                 Spacer(modifier = Modifier.height(16.dp))
                 Text(
                     text = if (renderTelemetry.videoSurfaceAttached) {
@@ -1006,26 +1060,18 @@ private fun VideoDetailsScreen(
                 Spacer(modifier = Modifier.height(12.dp))
             }
             Spacer(modifier = Modifier.height(12.dp))
-            Button(
+            GlassPrimaryButton(
+                label = "Play video",
                 enabled = video.accessState == VideoAccessState.Available,
                 onClick = { onPlay(video) },
                 modifier = Modifier.fillMaxWidth(),
-                shape = RoundedCornerShape(12.dp),
-                colors = ButtonDefaults.buttonColors(
-                    containerColor = MaterialTheme.colorScheme.primary,
-                    contentColor = MaterialTheme.colorScheme.onPrimary,
-                ),
-            ) {
-                Text("Play video")
-            }
+            )
             Spacer(modifier = Modifier.height(8.dp))
-            OutlinedButton(
+            GlassSecondaryButton(
+                label = "Remove from library",
                 onClick = { onDelete(video.id) },
                 modifier = Modifier.fillMaxWidth(),
-                shape = RoundedCornerShape(12.dp),
-            ) {
-                Text("Remove from library")
-            }
+            )
         }
     }
 }
