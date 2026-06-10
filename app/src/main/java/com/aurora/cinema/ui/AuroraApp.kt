@@ -37,6 +37,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
@@ -60,6 +61,9 @@ import com.aurora.cinema.library.VideoAccessState
 import com.aurora.cinema.library.VideoItem
 import com.aurora.cinema.media.CodecSupportStatus
 import com.aurora.cinema.playback.PlaybackState
+import com.aurora.cinema.render.AuroraRenderView
+import com.aurora.cinema.render.RenderEngine
+import com.aurora.cinema.render.RenderState
 import com.aurora.cinema.settings.AppSettings
 import com.aurora.cinema.settings.AppSettingsRepository
 import com.aurora.cinema.ui.theme.AuroraTheme
@@ -183,6 +187,7 @@ private fun AuroraShell(
                     settings = settings,
                     repository = appContainer.settingsRepository,
                 )
+                AppScreen.Renderer -> RendererScreen()
                 AppScreen.Calibration -> CalibrationScreen()
                 AppScreen.About -> AboutScreen(appContainer = appContainer)
             }
@@ -507,6 +512,86 @@ private fun SettingsScreen(
 }
 
 @Composable
+private fun RendererScreen() {
+    val lifecycleOwner = LocalLifecycleOwner.current
+    val renderEngine = remember { RenderEngine() }
+    val telemetry by renderEngine.telemetry.collectAsStateWithLifecycle()
+    var diagnosticMeshEnabled by rememberSaveable { mutableStateOf(false) }
+
+    DisposableEffect(lifecycleOwner, renderEngine) {
+        val observer = LifecycleEventObserver { _, event ->
+            when (event) {
+                Lifecycle.Event.ON_RESUME -> renderEngine.resume()
+                Lifecycle.Event.ON_PAUSE -> renderEngine.pause()
+                else -> Unit
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        if (lifecycleOwner.lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED)) {
+            renderEngine.resume()
+        }
+        onDispose {
+            lifecycleOwner.lifecycle.removeObserver(observer)
+            renderEngine.pause()
+        }
+    }
+
+    DisposableEffect(renderEngine) {
+        onDispose {
+            renderEngine.release()
+        }
+    }
+
+    ScreenColumn {
+        ScreenHeader(
+            title = "Render Diagnostics",
+            subtitle = "Custom EGL and OpenGL ES rendering foundation for the cinema surface.",
+        )
+        AndroidView(
+            modifier = Modifier
+                .fillMaxWidth()
+                .aspectRatio(16 / 9f),
+            factory = { context ->
+                AuroraRenderView(context, renderEngine = renderEngine)
+            },
+            update = {
+                renderEngine.setDiagnosticMeshEnabled(diagnosticMeshEnabled)
+            },
+        )
+        Spacer(modifier = Modifier.height(16.dp))
+        SettingSwitchRow(
+            label = "Diagnostic mesh",
+            body = "Draw a flat test screen to verify shader, buffer, and swap-chain behavior.",
+            checked = diagnosticMeshEnabled,
+            onCheckedChange = { diagnosticMeshEnabled = it },
+        )
+        Spacer(modifier = Modifier.height(20.dp))
+        StatusRow(label = "State", value = telemetry.state.label())
+        StatusRow(
+            label = "Surface",
+            value = if (telemetry.surfaceWidth > 0) {
+                "${telemetry.surfaceWidth}x${telemetry.surfaceHeight}"
+            } else {
+                "Waiting"
+            },
+        )
+        StatusRow(label = "Frame rate", value = "%.1f fps".format(telemetry.framesPerSecond))
+        StatusRow(label = "Frame time", value = "%.2f ms".format(telemetry.averageFrameTimeMs))
+        StatusRow(label = "Rendered frames", value = telemetry.renderedFrames.toString())
+        StatusRow(label = "Estimated drops", value = telemetry.estimatedDroppedFrames.toString())
+        StatusRow(label = "GL renderer", value = telemetry.glRenderer.ifBlank { "Waiting" })
+        StatusRow(label = "GL version", value = telemetry.glVersion.ifBlank { "Waiting" })
+        telemetry.lastError?.let { error ->
+            Text(
+                text = error,
+                color = MaterialTheme.colorScheme.error,
+                style = MaterialTheme.typography.bodyMedium,
+            )
+        }
+    }
+}
+
+@Composable
 private fun CalibrationScreen() {
     ScreenColumn {
         ScreenHeader(
@@ -719,8 +804,15 @@ private enum class AppScreen(
     Player("Player", "Player", "P"),
     VideoDetails("Video Details", "Details", "D"),
     Settings("Settings", "Settings", "S"),
+    Renderer("Render Diagnostics", "Render", "R"),
     Calibration("Headset Calibration", "Calibrate", "C"),
     About("About / Diagnostics", "About", "A"),
+}
+
+private fun RenderState.label(): String {
+    return name.replaceFirstChar { character ->
+        if (character.isLowerCase()) character.titlecase() else character.toString()
+    }
 }
 
 private val videoMimeTypes = arrayOf(
