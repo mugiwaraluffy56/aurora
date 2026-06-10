@@ -7,8 +7,15 @@ import android.content.pm.ActivityInfo
 import android.net.Uri
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.core.animateDpAsState
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.tween
+import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxScope
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
@@ -20,9 +27,12 @@ import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
@@ -46,22 +56,24 @@ import androidx.compose.material.icons.filled.Tv
 import androidx.compose.material.icons.filled.VideoLibrary
 import androidx.compose.material3.Button
 import androidx.compose.material3.FilterChip
+import androidx.compose.material3.FilterChipDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.NavigationBar
-import androidx.compose.material3.NavigationBarItem
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Slider
+import androidx.compose.material3.SliderDefaults
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
+import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
@@ -74,6 +86,10 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.blur
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalView
@@ -110,6 +126,8 @@ import com.aurora.cinema.settings.AppSettingsRepository
 import com.aurora.cinema.tracking.AndroidHeadTracker
 import com.aurora.cinema.tracking.HeadPose
 import com.aurora.cinema.ui.theme.AuroraTheme
+import com.aurora.cinema.ui.theme.AuroraGlass
+import com.aurora.cinema.ui.theme.AuroraControlTrack
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.launch
@@ -198,37 +216,35 @@ private fun AuroraShell(
                     }
                 },
                 colors = TopAppBarDefaults.topAppBarColors(
-                    containerColor = MaterialTheme.colorScheme.background,
+                    containerColor = MaterialTheme.colorScheme.background.copy(alpha = 0.86f),
                     titleContentColor = MaterialTheme.colorScheme.onBackground,
                 ),
             )
         },
         bottomBar = {
             if (!isSecondaryScreen && !vrMode) {
-                NavigationBar(containerColor = MaterialTheme.colorScheme.surface) {
-                    primaryScreens.forEach { screen ->
-                    NavigationBarItem(
-                        selected = selectedScreen == screen,
-                            onClick = { navigateTo(screen) },
-                        label = { Text(screen.navLabel) },
-                            icon = {
-                                Icon(
-                                    imageVector = screen.icon,
-                                    contentDescription = screen.navLabel,
-                                )
-                            },
-                    )
-                }
-            }
+                GlassNavigationBar(
+                    selectedScreen = selectedScreen,
+                    onSelect = ::navigateTo,
+                )
             }
         },
     ) { innerPadding ->
-        Surface(
+        Box(
             modifier = Modifier
                 .fillMaxSize()
-                .padding(innerPadding),
-            color = MaterialTheme.colorScheme.background,
+                .padding(innerPadding)
+                .background(
+                    Brush.verticalGradient(
+                        listOf(
+                            Color.Black,
+                            Color(0xFF0A0A0B),
+                            Color.Black,
+                        ),
+                    ),
+                ),
         ) {
+            LiquidBackdrop()
             when (selectedScreen) {
                 AppScreen.Library -> LibraryScreen(
                     videos = videos,
@@ -286,19 +302,30 @@ private fun AuroraShell(
 
 @Composable
 private fun SafetyAcknowledgementScreen(onContinue: () -> Unit) {
-    Surface(
-        modifier = Modifier.fillMaxSize(),
-        color = MaterialTheme.colorScheme.background,
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(
+                Brush.verticalGradient(
+                    listOf(
+                        Color.Black,
+                        Color(0xFF0A0A0B),
+                        Color.Black,
+                    ),
+                ),
+            ),
     ) {
+        LiquidBackdrop()
         Column(
             modifier = Modifier
                 .fillMaxSize()
-                .padding(horizontal = 24.dp, vertical = 32.dp),
+                .padding(horizontal = 24.dp, vertical = 36.dp),
         ) {
             Text(
                 text = "AURORA",
                 style = MaterialTheme.typography.labelMedium,
                 color = MaterialTheme.colorScheme.primary,
+                fontWeight = FontWeight.SemiBold,
             )
             Box(
                 modifier = Modifier
@@ -306,31 +333,251 @@ private fun SafetyAcknowledgementScreen(onContinue: () -> Unit) {
                     .fillMaxWidth(),
                 contentAlignment = Alignment.Center,
             ) {
-                Icon(
-                    imageVector = Icons.Default.Tv,
-                    contentDescription = null,
-                    modifier = Modifier.size(72.dp),
-                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                GlassIconBadge(icon = Icons.Default.Tv, size = 112)
+            }
+            GlassPanel(modifier = Modifier.fillMaxWidth()) {
+                Text(
+                    text = "Before you begin",
+                    style = MaterialTheme.typography.headlineLarge,
+                    textAlign = TextAlign.Center,
+                )
+                Spacer(modifier = Modifier.height(8.dp))
+                Text(
+                    text = "Use Aurora while seated in a clear space. Keep brightness comfortable and stop immediately if you feel discomfort.",
+                    style = MaterialTheme.typography.bodyLarge,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    textAlign = TextAlign.Center,
+                )
+                Spacer(modifier = Modifier.height(24.dp))
+                GlassPrimaryButton(
+                    label = "Continue",
+                    onClick = onContinue,
+                    modifier = Modifier.fillMaxWidth(),
                 )
             }
-            Text(
-                text = "Before you begin",
-                style = MaterialTheme.typography.headlineLarge,
-            )
-            Spacer(modifier = Modifier.height(8.dp))
-            Text(
-                text = "Use Aurora while seated in a clear space. Keep brightness comfortable and stop immediately if you feel discomfort.",
-                style = MaterialTheme.typography.bodyLarge,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-            Spacer(modifier = Modifier.height(24.dp))
-            Button(
-                onClick = onContinue,
-                modifier = Modifier.fillMaxWidth(),
-                shape = RoundedCornerShape(8.dp),
-            ) {
-                Text("Continue")
+        }
+    }
+}
+
+@Composable
+private fun GlassNavigationBar(
+    selectedScreen: AppScreen,
+    onSelect: (AppScreen) -> Unit,
+) {
+    Surface(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 20.dp, vertical = 14.dp)
+            .heightIn(min = 92.dp),
+        color = Color.White.copy(alpha = 0.12f),
+        contentColor = MaterialTheme.colorScheme.onSurface,
+        shape = RoundedCornerShape(56.dp),
+        border = BorderStroke(1.dp, Color.White.copy(alpha = 0.22f)),
+        shadowElevation = 18.dp,
+    ) {
+        Row(
+            modifier = Modifier.padding(10.dp),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            primaryScreens.forEach { screen ->
+                val selected = selectedScreen == screen
+                val itemColor by animateColorAsState(
+                    targetValue = if (selected) {
+                        Color.White.copy(alpha = 0.18f)
+                    } else {
+                        Color.Transparent
+                    },
+                    animationSpec = tween(durationMillis = 260),
+                    label = "nav-item-color",
+                )
+                val itemScale by animateFloatAsState(
+                    targetValue = if (selected) 1.02f else 0.96f,
+                    animationSpec = tween(durationMillis = 260),
+                    label = "nav-item-scale",
+                )
+                val itemElevation by animateDpAsState(
+                    targetValue = if (selected) 10.dp else 0.dp,
+                    animationSpec = tween(durationMillis = 260),
+                    label = "nav-item-elevation",
+                )
+                Surface(
+                    modifier = Modifier
+                        .weight(1f)
+                        .heightIn(min = 72.dp)
+                        .graphicsLayer {
+                            scaleX = itemScale
+                            scaleY = itemScale
+                        }
+                        .clickable { onSelect(screen) },
+                    color = itemColor,
+                    contentColor = if (selected) {
+                        MaterialTheme.colorScheme.onSurface
+                    } else {
+                        MaterialTheme.colorScheme.onSurfaceVariant
+                    },
+                    shape = RoundedCornerShape(44.dp),
+                    shadowElevation = itemElevation,
+                ) {
+                    Column(
+                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 8.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.Center,
+                    ) {
+                        Icon(
+                            imageVector = screen.icon,
+                            contentDescription = screen.navLabel,
+                            modifier = Modifier.size(28.dp),
+                        )
+                        Spacer(modifier = Modifier.height(4.dp))
+                        Text(
+                            text = screen.navLabel,
+                            style = MaterialTheme.typography.labelMedium,
+                            fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Medium,
+                            maxLines = 1,
+                        )
+                    }
+                }
             }
+        }
+    }
+}
+
+@Composable
+private fun BoxScope.LiquidBackdrop() {
+    Box(
+        modifier = Modifier
+            .size(360.dp)
+            .align(Alignment.TopEnd)
+            .offset(x = 120.dp, y = 40.dp)
+            .blur(90.dp)
+            .background(Color.White.copy(alpha = 0.07f), CircleShape),
+    )
+    Box(
+        modifier = Modifier
+            .size(280.dp)
+            .align(Alignment.CenterStart)
+            .offset(x = (-120).dp, y = 80.dp)
+            .blur(100.dp)
+            .background(Color.White.copy(alpha = 0.08f), CircleShape),
+    )
+    Box(
+        modifier = Modifier
+            .size(240.dp)
+            .align(Alignment.BottomEnd)
+            .offset(x = 80.dp, y = (-40).dp)
+            .blur(80.dp)
+            .background(Color.White.copy(alpha = 0.05f), CircleShape),
+    )
+}
+
+@Composable
+private fun GlassPanel(
+    modifier: Modifier = Modifier,
+    content: @Composable ColumnScope.() -> Unit,
+) {
+    Surface(
+        modifier = modifier,
+        color = Color.White.copy(alpha = 0.10f),
+        contentColor = MaterialTheme.colorScheme.onSurface,
+        shape = RoundedCornerShape(32.dp),
+        border = BorderStroke(1.dp, Color.White.copy(alpha = 0.22f)),
+        shadowElevation = 16.dp,
+    ) {
+        Column(
+            modifier = Modifier.padding(24.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            content = content,
+        )
+    }
+}
+
+@Composable
+private fun GlassIconBadge(
+    icon: ImageVector,
+    size: Int = 72,
+) {
+    Surface(
+        modifier = Modifier.size(size.dp),
+        color = Color.White.copy(alpha = 0.12f),
+        contentColor = MaterialTheme.colorScheme.onSurface,
+        shape = RoundedCornerShape((size / 3).dp),
+        border = BorderStroke(1.dp, Color.White.copy(alpha = 0.22f)),
+        shadowElevation = 12.dp,
+    ) {
+        Box(contentAlignment = Alignment.Center) {
+            Icon(
+                imageVector = icon,
+                contentDescription = null,
+                modifier = Modifier.size((size * 0.46f).dp),
+                tint = MaterialTheme.colorScheme.onSurface,
+            )
+        }
+    }
+}
+
+@Composable
+private fun GlassPrimaryButton(
+    label: String,
+    modifier: Modifier = Modifier,
+    icon: ImageVector? = null,
+    onClick: () -> Unit,
+) {
+    val lift by animateDpAsState(
+        targetValue = 10.dp,
+        animationSpec = tween(durationMillis = 260),
+        label = "glass-primary-lift",
+    )
+    Surface(
+        modifier = modifier
+            .heightIn(min = 56.dp)
+            .clickable(onClick = onClick),
+        color = Color.White.copy(alpha = 0.16f),
+        contentColor = MaterialTheme.colorScheme.onSurface,
+        shape = RoundedCornerShape(28.dp),
+        border = BorderStroke(1.dp, Color.White.copy(alpha = 0.30f)),
+        shadowElevation = lift,
+    ) {
+        Row(
+            modifier = Modifier.padding(horizontal = 20.dp, vertical = 14.dp),
+            horizontalArrangement = Arrangement.Center,
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            if (icon != null) {
+                Icon(icon, contentDescription = null)
+                Spacer(modifier = Modifier.size(10.dp))
+            }
+            Text(label, style = MaterialTheme.typography.labelLarge)
+        }
+    }
+}
+
+@Composable
+private fun GlassSecondaryButton(
+    label: String,
+    modifier: Modifier = Modifier,
+    icon: ImageVector? = null,
+    onClick: () -> Unit,
+) {
+    Surface(
+        modifier = modifier
+            .heightIn(min = 56.dp)
+            .clickable(onClick = onClick),
+        color = Color.White.copy(alpha = 0.08f),
+        contentColor = MaterialTheme.colorScheme.onSurface,
+        shape = RoundedCornerShape(28.dp),
+        border = BorderStroke(1.dp, Color.White.copy(alpha = 0.18f)),
+    ) {
+        Row(
+            modifier = Modifier.padding(horizontal = 20.dp, vertical = 14.dp),
+            horizontalArrangement = Arrangement.Center,
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            if (icon != null) {
+                Icon(icon, contentDescription = null)
+                Spacer(modifier = Modifier.size(10.dp))
+            }
+            Text(label, style = MaterialTheme.typography.labelLarge)
         }
     }
 }
@@ -424,11 +671,12 @@ private fun LibraryScreen(
             Spacer(modifier = Modifier.height(12.dp))
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 LibrarySort.entries.forEach { option ->
-                    FilterChip(
-                        selected = sort == option,
-                        onClick = { sort = option },
-                        label = { Text(option.label) },
-                    )
+                FilterChip(
+                    selected = sort == option,
+                    onClick = { sort = option },
+                    label = { Text(option.label) },
+                    colors = glassChipColors(),
+                )
                 }
             }
             Spacer(modifier = Modifier.height(20.dp))
@@ -559,7 +807,7 @@ private fun PlayerScreen(
             ) {
                 Surface(
                     color = MaterialTheme.colorScheme.surface.copy(alpha = 0.82f),
-                    shape = RoundedCornerShape(8.dp),
+                    shape = RoundedCornerShape(14.dp),
                 ) {
                     IconButton(onClick = {
                         if (headTracker.available) headTracker.recenter() else renderEngine.recenter()
@@ -569,7 +817,7 @@ private fun PlayerScreen(
                 }
                 Surface(
                     color = MaterialTheme.colorScheme.surface.copy(alpha = 0.82f),
-                    shape = RoundedCornerShape(8.dp),
+                    shape = RoundedCornerShape(14.dp),
                 ) {
                     IconButton(onClick = { onVrModeChanged(false) }) {
                         Icon(Icons.Default.Close, contentDescription = "Exit VR")
@@ -612,7 +860,7 @@ private fun PlayerScreen(
                 OutlinedButton(
                     onClick = { onVrModeChanged(true) },
                     modifier = Modifier.fillMaxWidth(),
-                    shape = RoundedCornerShape(8.dp),
+                    shape = RoundedCornerShape(12.dp),
                 ) {
                     Icon(Icons.Default.Fullscreen, contentDescription = null)
                     Spacer(modifier = Modifier.size(8.dp))
@@ -672,7 +920,11 @@ private fun PlayerScreen(
                 Button(
                     onClick = { onVrModeChanged(true) },
                     modifier = Modifier.fillMaxWidth(),
-                    shape = RoundedCornerShape(8.dp),
+                    shape = RoundedCornerShape(12.dp),
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = MaterialTheme.colorScheme.primary,
+                        contentColor = MaterialTheme.colorScheme.onPrimary,
+                    ),
                 ) {
                     Icon(Icons.Default.Fullscreen, contentDescription = null)
                     Spacer(modifier = Modifier.size(8.dp))
@@ -758,7 +1010,11 @@ private fun VideoDetailsScreen(
                 enabled = video.accessState == VideoAccessState.Available,
                 onClick = { onPlay(video) },
                 modifier = Modifier.fillMaxWidth(),
-                shape = RoundedCornerShape(8.dp),
+                shape = RoundedCornerShape(12.dp),
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = MaterialTheme.colorScheme.primary,
+                    contentColor = MaterialTheme.colorScheme.onPrimary,
+                ),
             ) {
                 Text("Play video")
             }
@@ -766,7 +1022,7 @@ private fun VideoDetailsScreen(
             OutlinedButton(
                 onClick = { onDelete(video.id) },
                 modifier = Modifier.fillMaxWidth(),
-                shape = RoundedCornerShape(8.dp),
+                shape = RoundedCornerShape(12.dp),
             ) {
                 Text("Remove from library")
             }
@@ -810,6 +1066,7 @@ private fun SettingsScreen(
                 scope.launch { repository.setDefaultScreenDistanceMeters(distance) }
             },
             valueRange = 3.0f..20.0f,
+            colors = glassSliderColors(),
         )
         Spacer(modifier = Modifier.height(24.dp))
         SectionLabel("HEADSET")
@@ -924,6 +1181,7 @@ private fun RendererScreen(
                         scope.launch { repository.setCinemaScreenConfig(draftConfig) }
                     },
                     label = { Text(mode.label) },
+                    colors = glassChipColors(),
                 )
             }
         }
@@ -939,6 +1197,7 @@ private fun RendererScreen(
                         scope.launch { repository.setCinemaScreenConfig(draftConfig) }
                     },
                     label = { Text(mode.label) },
+                    colors = glassChipColors(),
                 )
             }
         }
@@ -1101,6 +1360,7 @@ private fun CalibrationScreen(
                         scope.launch { repository.setStereoConfig(draft) }
                     },
                     label = { Text(mode.label) },
+                    colors = glassChipColors(),
                 )
             }
         }
@@ -1147,7 +1407,7 @@ private fun AboutScreen(appContainer: AppContainer) {
 @Composable
 private fun ScreenColumn(
     verticalArrangement: Arrangement.Vertical = Arrangement.Top,
-    contentPadding: androidx.compose.ui.unit.Dp = 20.dp,
+    contentPadding: androidx.compose.ui.unit.Dp = 32.dp,
     content: @Composable ColumnScope.() -> Unit,
 ) {
     Column(
@@ -1224,21 +1484,20 @@ private fun EmptyLibrary(
             .padding(top = 56.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
-        EmptyState(
-            icon = Icons.Default.VideoLibrary,
-            title = "Build your offline cinema",
-            body = "Add a local video or folder. Aurora keeps access on this device for playback without a network connection.",
-            actionLabel = "Add video",
-            onAction = onImportVideo,
-        )
-        OutlinedButton(
-            onClick = onImportFolder,
-            modifier = Modifier.fillMaxWidth(),
-            shape = RoundedCornerShape(8.dp),
-        ) {
-            Icon(Icons.Default.FolderOpen, contentDescription = null)
-            Spacer(modifier = Modifier.size(8.dp))
-            Text("Add folder")
+        GlassPanel(modifier = Modifier.fillMaxWidth()) {
+            EmptyState(
+                icon = Icons.Default.VideoLibrary,
+                title = "Build your offline cinema",
+                body = "Add a local video or folder. Aurora keeps access on this device for playback without a network connection.",
+                actionLabel = "Add video",
+                onAction = onImportVideo,
+            )
+            GlassSecondaryButton(
+                label = "Add folder",
+                icon = Icons.Default.FolderOpen,
+                onClick = onImportFolder,
+                modifier = Modifier.fillMaxWidth(),
+            )
         }
     }
 }
@@ -1256,12 +1515,7 @@ private fun EmptyState(
         modifier = Modifier.fillMaxWidth(),
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
-        Icon(
-            imageVector = icon,
-            contentDescription = null,
-            modifier = Modifier.size(48.dp),
-            tint = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
+        GlassIconBadge(icon = icon, size = 88)
         Spacer(modifier = Modifier.height(16.dp))
         Text(
             text = title,
@@ -1277,15 +1531,12 @@ private fun EmptyState(
         )
         if (actionLabel != null && onAction != null) {
             Spacer(modifier = Modifier.height(20.dp))
-            Button(
+            GlassPrimaryButton(
+                label = actionLabel,
+                icon = actionIcon,
                 onClick = onAction,
                 modifier = Modifier.fillMaxWidth(),
-                shape = RoundedCornerShape(8.dp),
-            ) {
-                Icon(actionIcon, contentDescription = null)
-                Spacer(modifier = Modifier.size(8.dp))
-                Text(actionLabel)
-            }
+            )
             Spacer(modifier = Modifier.height(8.dp))
         }
     }
@@ -1301,7 +1552,7 @@ private fun VideoListItem(
             .fillMaxWidth()
             .clickable(onClick = onOpenDetails),
         color = MaterialTheme.colorScheme.surface,
-        shape = RoundedCornerShape(8.dp),
+        shape = RoundedCornerShape(14.dp),
     ) {
         Row(
             modifier = Modifier.padding(16.dp),
@@ -1365,6 +1616,14 @@ private fun SettingSwitchRow(
         Switch(
             checked = checked,
             onCheckedChange = onCheckedChange,
+            colors = SwitchDefaults.colors(
+                checkedThumbColor = MaterialTheme.colorScheme.onPrimary,
+                checkedTrackColor = MaterialTheme.colorScheme.primary,
+                checkedBorderColor = MaterialTheme.colorScheme.primary,
+                uncheckedThumbColor = MaterialTheme.colorScheme.onSurfaceVariant,
+                uncheckedTrackColor = AuroraControlTrack,
+                uncheckedBorderColor = MaterialTheme.colorScheme.outline,
+            ),
         )
     }
 }
@@ -1395,8 +1654,29 @@ private fun CinemaConfigSlider(
         onValueChange = onValueChange,
         onValueChangeFinished = onValueChangeFinished,
         valueRange = range,
+        colors = glassSliderColors(),
     )
 }
+
+@Composable
+private fun glassSliderColors() = SliderDefaults.colors(
+    thumbColor = MaterialTheme.colorScheme.primary,
+    activeTrackColor = MaterialTheme.colorScheme.primary,
+    activeTickColor = Color.Transparent,
+    inactiveTrackColor = AuroraControlTrack,
+    inactiveTickColor = Color.Transparent,
+)
+
+@Composable
+private fun glassChipColors() = FilterChipDefaults.filterChipColors(
+    containerColor = Color.Transparent,
+    labelColor = MaterialTheme.colorScheme.onSurfaceVariant,
+    iconColor = MaterialTheme.colorScheme.onSurfaceVariant,
+    selectedContainerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.78f),
+    selectedLabelColor = MaterialTheme.colorScheme.onSurface,
+    selectedLeadingIconColor = MaterialTheme.colorScheme.onSurface,
+    selectedTrailingIconColor = MaterialTheme.colorScheme.onSurface,
+)
 
 @Composable
 private fun StatusRow(label: String, value: String) {
@@ -1446,7 +1726,7 @@ private fun NavigationRow(
             .fillMaxWidth()
             .clickable(onClick = onClick),
         color = MaterialTheme.colorScheme.surface,
-        shape = RoundedCornerShape(8.dp),
+        shape = RoundedCornerShape(14.dp),
     ) {
         Row(
             modifier = Modifier.padding(16.dp),
@@ -1481,7 +1761,7 @@ private fun PlaybackControl(
     Surface(
         color = if (emphasized) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surface,
         contentColor = if (emphasized) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurface,
-        shape = RoundedCornerShape(8.dp),
+        shape = RoundedCornerShape(12.dp),
     ) {
         IconButton(onClick = onClick) {
             Icon(icon, contentDescription = description)
