@@ -38,6 +38,69 @@ class ScreenGeometryTest {
         )
     }
 
+    @Test
+    fun aspectPresetsOverrideSourceRatio() {
+        assertEquals(
+            1.43f,
+            ScreenGeometry.resolveAspectRatio(ScreenAspectRatio.Imax143, 3840, 2160),
+            TOLERANCE,
+        )
+        assertEquals(
+            16f / 9f,
+            ScreenGeometry.resolveAspectRatio(ScreenAspectRatio.Source, 3840, 2160),
+            TOLERANCE,
+        )
+    }
+
+    @Test
+    fun fitMappingLetterboxesWideContent() {
+        val mapping = ScreenGeometry.contentMapping(
+            cropMode = ScreenCropMode.Fit,
+            screenAspectRatio = 16f / 9f,
+            videoWidth = 2390,
+            videoHeight = 1000,
+        )
+
+        assertEquals(1f, mapping.activeScaleX, TOLERANCE)
+        assertEquals((16f / 9f) / 2.39f, mapping.activeScaleY, TOLERANCE)
+    }
+
+    @Test
+    fun curvedMeshHasStableSizeAndCurvedDepth() {
+        val vertices = ScreenGeometry.buildMesh(
+            config = CinemaScreenConfig(
+                widthMeters = 18f,
+                distanceMeters = 8f,
+                curvatureRadiusMeters = 16f,
+            ),
+            videoWidth = 3840,
+            videoHeight = 2160,
+            curvedSegments = 8,
+        )
+
+        assertEquals(8 * 6 * 5, vertices.size)
+        val leftEdgeZ = vertices[2]
+        val centerSegmentZ = vertices[(4 * 6 * 5) + 2]
+        assert(leftEdgeZ < centerSegmentZ)
+    }
+
+    @Test
+    fun flatMeshUsesRequestedPhysicalDimensions() {
+        val vertices = ScreenGeometry.buildMesh(
+            config = CinemaScreenConfig(
+                aspectRatioMode = ScreenAspectRatio.Imax190,
+                widthMeters = 19f,
+                distanceMeters = 10f,
+            ),
+            videoWidth = 3840,
+            videoHeight = 2160,
+        )
+
+        assertEquals(-9.5f, vertices[0], TOLERANCE)
+        assertEquals(-5f, vertices[1], TOLERANCE)
+        assertEquals(-10f, vertices[2], TOLERANCE)
+    }
+
     private companion object {
         const val TOLERANCE = 0.001f
     }

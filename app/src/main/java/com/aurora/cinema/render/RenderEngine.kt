@@ -52,6 +52,10 @@ class RenderEngine {
         post { setVideoSize(width, height) }
     }
 
+    fun setCinemaScreenConfig(config: CinemaScreenConfig) {
+        post { setCinemaScreenConfig(config) }
+    }
+
     fun release() {
         if (released) return
         released = true

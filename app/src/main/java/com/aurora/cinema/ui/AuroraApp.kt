@@ -12,6 +12,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -85,8 +86,11 @@ import com.aurora.cinema.library.VideoItem
 import com.aurora.cinema.media.CodecSupportStatus
 import com.aurora.cinema.playback.PlaybackState
 import com.aurora.cinema.render.AuroraRenderView
+import com.aurora.cinema.render.CinemaScreenConfig
 import com.aurora.cinema.render.RenderEngine
 import com.aurora.cinema.render.RenderState
+import com.aurora.cinema.render.ScreenAspectRatio
+import com.aurora.cinema.render.ScreenCropMode
 import com.aurora.cinema.settings.AppSettings
 import com.aurora.cinema.settings.AppSettingsRepository
 import com.aurora.cinema.ui.theme.AuroraTheme
@@ -221,6 +225,7 @@ private fun AuroraShell(
                     selectedVideo = videos.firstOrNull { it.id == selectedVideoId },
                     playbackState = playbackState,
                     appContainer = appContainer,
+                    screenConfig = settings.cinemaScreenConfig,
                     onBrowseLibrary = { navigateTo(AppScreen.Library) },
                 )
                 AppScreen.VideoDetails -> VideoDetailsScreen(
@@ -245,7 +250,10 @@ private fun AuroraShell(
                     onOpenCalibration = { navigateTo(AppScreen.Calibration) },
                     onOpenAbout = { navigateTo(AppScreen.About) },
                 )
-                AppScreen.Renderer -> RendererScreen()
+                AppScreen.Renderer -> RendererScreen(
+                    settings = settings,
+                    repository = appContainer.settingsRepository,
+                )
                 AppScreen.Calibration -> CalibrationScreen()
                 AppScreen.About -> AboutScreen(appContainer = appContainer)
             }
@@ -425,6 +433,7 @@ private fun PlayerScreen(
     selectedVideo: VideoItem?,
     playbackState: PlaybackState,
     appContainer: AppContainer,
+    screenConfig: CinemaScreenConfig,
     onBrowseLibrary: () -> Unit,
 ) {
     val lifecycleOwner = LocalLifecycleOwner.current
@@ -438,6 +447,10 @@ private fun PlayerScreen(
 
     LaunchedEffect(playbackState.videoWidth, playbackState.videoHeight) {
         renderEngine.setVideoSize(playbackState.videoWidth, playbackState.videoHeight)
+    }
+
+    LaunchedEffect(screenConfig) {
+        renderEngine.setCinemaScreenConfig(screenConfig)
     }
 
     DisposableEffect(lifecycleOwner, renderEngine) {
@@ -674,11 +687,24 @@ private fun SettingsScreen(
 }
 
 @Composable
-private fun RendererScreen() {
+private fun RendererScreen(
+    settings: AppSettings,
+    repository: AppSettingsRepository,
+) {
     val lifecycleOwner = LocalLifecycleOwner.current
     val renderEngine = remember { RenderEngine() }
     val telemetry by renderEngine.telemetry.collectAsStateWithLifecycle()
+    val scope = rememberCoroutineScope()
     var diagnosticMeshEnabled by rememberSaveable { mutableStateOf(false) }
+    var draftConfig by remember { mutableStateOf(settings.cinemaScreenConfig) }
+
+    LaunchedEffect(settings.cinemaScreenConfig) {
+        draftConfig = settings.cinemaScreenConfig
+    }
+
+    LaunchedEffect(draftConfig) {
+        renderEngine.setCinemaScreenConfig(draftConfig)
+    }
 
     DisposableEffect(lifecycleOwner, renderEngine) {
         val observer = LifecycleEventObserver { _, event ->
@@ -726,6 +752,122 @@ private fun RendererScreen() {
             body = "Draw a flat test screen to verify shader, buffer, and swap-chain behavior.",
             checked = diagnosticMeshEnabled,
             onCheckedChange = { diagnosticMeshEnabled = it },
+        )
+        Spacer(modifier = Modifier.height(24.dp))
+        SectionLabel("SCREEN PRESET")
+        Text("Aspect ratio", style = MaterialTheme.typography.titleMedium)
+        Spacer(modifier = Modifier.height(8.dp))
+        FlowRow(
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            ScreenAspectRatio.entries.forEach { mode ->
+                FilterChip(
+                    selected = draftConfig.aspectRatioMode == mode,
+                    onClick = {
+                        draftConfig = draftConfig.copy(aspectRatioMode = mode)
+                        scope.launch { repository.setCinemaScreenConfig(draftConfig) }
+                    },
+                    label = { Text(mode.label) },
+                )
+            }
+        }
+        Spacer(modifier = Modifier.height(16.dp))
+        Text("Content framing", style = MaterialTheme.typography.titleMedium)
+        Spacer(modifier = Modifier.height(8.dp))
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            ScreenCropMode.entries.forEach { mode ->
+                FilterChip(
+                    selected = draftConfig.cropMode == mode,
+                    onClick = {
+                        draftConfig = draftConfig.copy(cropMode = mode)
+                        scope.launch { repository.setCinemaScreenConfig(draftConfig) }
+                    },
+                    label = { Text(mode.label) },
+                )
+            }
+        }
+        Spacer(modifier = Modifier.height(16.dp))
+        SettingSwitchRow(
+            label = "Curved screen",
+            body = "Wrap the screen around the viewing position",
+            checked = draftConfig.curvatureRadiusMeters > 0f,
+            onCheckedChange = { enabled ->
+                draftConfig = draftConfig.copy(curvatureRadiusMeters = if (enabled) 16f else 0f)
+                scope.launch { repository.setCinemaScreenConfig(draftConfig) }
+            },
+        )
+        if (draftConfig.curvatureRadiusMeters > 0f) {
+            CinemaConfigSlider(
+                label = "Curve radius",
+                valueLabel = "${draftConfig.curvatureRadiusMeters.toInt()} m",
+                value = draftConfig.curvatureRadiusMeters,
+                range = 8f..40f,
+                onValueChange = { draftConfig = draftConfig.copy(curvatureRadiusMeters = it) },
+                onValueChangeFinished = {
+                    scope.launch { repository.setCinemaScreenConfig(draftConfig) }
+                },
+            )
+        }
+        CinemaConfigSlider(
+            label = "Distance",
+            valueLabel = "${draftConfig.distanceMeters.toInt()} m",
+            value = draftConfig.distanceMeters,
+            range = 3f..20f,
+            onValueChange = { draftConfig = draftConfig.copy(distanceMeters = it) },
+            onValueChangeFinished = {
+                scope.launch { repository.setCinemaScreenConfig(draftConfig) }
+            },
+        )
+        CinemaConfigSlider(
+            label = "Width",
+            valueLabel = "${draftConfig.widthMeters.toInt()} m",
+            value = draftConfig.widthMeters,
+            range = 6f..30f,
+            onValueChange = { draftConfig = draftConfig.copy(widthMeters = it) },
+            onValueChangeFinished = {
+                scope.launch { repository.setCinemaScreenConfig(draftConfig) }
+            },
+        )
+        CinemaConfigSlider(
+            label = "Vertical offset",
+            valueLabel = "%.1f m".format(draftConfig.verticalOffsetMeters),
+            value = draftConfig.verticalOffsetMeters,
+            range = -4f..4f,
+            onValueChange = { draftConfig = draftConfig.copy(verticalOffsetMeters = it) },
+            onValueChangeFinished = {
+                scope.launch { repository.setCinemaScreenConfig(draftConfig) }
+            },
+        )
+        CinemaConfigSlider(
+            label = "Tilt",
+            valueLabel = "${draftConfig.tiltDegrees.toInt()}°",
+            value = draftConfig.tiltDegrees,
+            range = -15f..15f,
+            onValueChange = { draftConfig = draftConfig.copy(tiltDegrees = it) },
+            onValueChangeFinished = {
+                scope.launch { repository.setCinemaScreenConfig(draftConfig) }
+            },
+        )
+        CinemaConfigSlider(
+            label = "Brightness",
+            valueLabel = "${(draftConfig.brightness * 100).toInt()}%",
+            value = draftConfig.brightness,
+            range = 0.5f..1.5f,
+            onValueChange = { draftConfig = draftConfig.copy(brightness = it) },
+            onValueChangeFinished = {
+                scope.launch { repository.setCinemaScreenConfig(draftConfig) }
+            },
+        )
+        CinemaConfigSlider(
+            label = "Contrast",
+            valueLabel = "${(draftConfig.contrast * 100).toInt()}%",
+            value = draftConfig.contrast,
+            range = 0.5f..1.5f,
+            onValueChange = { draftConfig = draftConfig.copy(contrast = it) },
+            onValueChangeFinished = {
+                scope.launch { repository.setCinemaScreenConfig(draftConfig) }
+            },
         )
         Spacer(modifier = Modifier.height(24.dp))
         SectionLabel("LIVE TELEMETRY")
@@ -996,6 +1138,35 @@ private fun SettingSwitchRow(
 }
 
 @Composable
+private fun CinemaConfigSlider(
+    label: String,
+    valueLabel: String,
+    value: Float,
+    range: ClosedFloatingPointRange<Float>,
+    onValueChange: (Float) -> Unit,
+    onValueChangeFinished: () -> Unit,
+) {
+    Spacer(modifier = Modifier.height(16.dp))
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.SpaceBetween,
+    ) {
+        Text(label, style = MaterialTheme.typography.titleMedium)
+        Text(
+            valueLabel,
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+    }
+    Slider(
+        value = value,
+        onValueChange = onValueChange,
+        onValueChangeFinished = onValueChangeFinished,
+        valueRange = range,
+    )
+}
+
+@Composable
 private fun StatusRow(label: String, value: String) {
     Row(
         modifier = Modifier
@@ -1253,6 +1424,8 @@ private fun AuroraAppPreview() {
                     override suspend fun setComfortModeEnabled(enabled: Boolean) = Unit
 
                     override suspend fun setDefaultScreenDistanceMeters(distanceMeters: Float) = Unit
+
+                    override suspend fun setCinemaScreenConfig(config: CinemaScreenConfig) = Unit
                 }
             },
         )

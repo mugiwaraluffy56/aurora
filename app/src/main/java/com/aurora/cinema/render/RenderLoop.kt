@@ -23,11 +23,17 @@ internal class RenderLoop(
     private var diagnosticMeshEnabled = false
     private var videoWidth = 0
     private var videoHeight = 0
-    private var screenScaleX = 1f
-    private var screenScaleY = 1f
+    private var screenConfig = CinemaScreenConfig()
+    private var screenAspectRatio = 16f / 9f
+    private var projectionMatrix = MatrixMath.identity()
+    private var contentMapping = ContentMapping()
     private var videoTextureUniform = -1
     private var textureTransformUniform = -1
-    private var screenScaleUniform = -1
+    private var projectionUniform = -1
+    private var activeScaleUniform = -1
+    private var sampleScaleUniform = -1
+    private var brightnessUniform = -1
+    private var contrastUniform = -1
     private var renderedFrames = 0L
     private var droppedFrames = 0L
 
@@ -36,14 +42,14 @@ internal class RenderLoop(
         this.surface = surface
         this.width = width
         this.height = height
-        updateScreenScale()
+        updateProjection()
         startIfReady()
     }
 
     fun resize(width: Int, height: Int) {
         this.width = width
         this.height = height
-        updateScreenScale()
+        updateProjection()
         if (videoShader != null) {
             GLES30.glViewport(0, 0, width, height)
         }
@@ -74,8 +80,14 @@ internal class RenderLoop(
     fun setVideoSize(width: Int, height: Int) {
         videoWidth = width
         videoHeight = height
-        updateScreenScale()
+        rebuildScreenGeometry()
         videoSampler?.setDefaultBufferSize(width, height)
+    }
+
+    fun setCinemaScreenConfig(config: CinemaScreenConfig) {
+        if (screenConfig == config) return
+        screenConfig = config
+        rebuildScreenGeometry()
     }
 
     fun release() {
@@ -103,8 +115,13 @@ internal class RenderLoop(
                 val shaderId = checkNotNull(videoShader).id
                 videoTextureUniform = GLES30.glGetUniformLocation(shaderId, "uVideoTexture")
                 textureTransformUniform = GLES30.glGetUniformLocation(shaderId, "uTextureTransform")
-                screenScaleUniform = GLES30.glGetUniformLocation(shaderId, "uScreenScale")
-                mesh = Mesh.screenQuad()
+                projectionUniform = GLES30.glGetUniformLocation(shaderId, "uProjection")
+                activeScaleUniform = GLES30.glGetUniformLocation(shaderId, "uActiveScale")
+                sampleScaleUniform = GLES30.glGetUniformLocation(shaderId, "uSampleScale")
+                brightnessUniform = GLES30.glGetUniformLocation(shaderId, "uBrightness")
+                contrastUniform = GLES30.glGetUniformLocation(shaderId, "uContrast")
+                updateProjection()
+                rebuildScreenGeometry()
                 diagnosticOverlay = DiagnosticOverlay()
                 videoSampler = VideoFrameSampler(callbackHandler).also { sampler ->
                     sampler.setDefaultBufferSize(videoWidth, videoHeight)
@@ -146,11 +163,11 @@ internal class RenderLoop(
                 sampler.transformMatrix(),
                 0,
             )
-            GLES30.glUniform2f(
-                screenScaleUniform,
-                screenScaleX,
-                screenScaleY,
-            )
+            GLES30.glUniformMatrix4fv(projectionUniform, 1, false, projectionMatrix, 0)
+            GLES30.glUniform2f(activeScaleUniform, contentMapping.activeScaleX, contentMapping.activeScaleY)
+            GLES30.glUniform2f(sampleScaleUniform, contentMapping.sampleScaleX, contentMapping.sampleScaleY)
+            GLES30.glUniform1f(brightnessUniform, screenConfig.brightness)
+            GLES30.glUniform1f(contrastUniform, screenConfig.contrast)
             mesh?.draw()
             GLES30.glBindTexture(android.opengl.GLES11Ext.GL_TEXTURE_EXTERNAL_OES, 0)
         }
@@ -190,14 +207,40 @@ internal class RenderLoop(
         videoShader = null
         videoTextureUniform = -1
         textureTransformUniform = -1
-        screenScaleUniform = -1
+        projectionUniform = -1
+        activeScaleUniform = -1
+        sampleScaleUniform = -1
+        brightnessUniform = -1
+        contrastUniform = -1
         egl.release()
     }
 
-    private fun updateScreenScale() {
-        val scale = ScreenGeometry.aspectFit(width, height, videoWidth, videoHeight)
-        screenScaleX = scale.x
-        screenScaleY = scale.y
+    private fun updateProjection() {
+        if (width <= 0 || height <= 0) return
+        projectionMatrix = MatrixMath.perspective(
+            verticalFieldOfViewDegrees = 90f,
+            aspectRatio = width.toFloat() / height,
+            nearPlane = 0.1f,
+            farPlane = 100f,
+        )
+    }
+
+    private fun rebuildScreenGeometry() {
+        screenAspectRatio = ScreenGeometry.resolveAspectRatio(
+            screenConfig.aspectRatioMode,
+            videoWidth,
+            videoHeight,
+        )
+        contentMapping = ScreenGeometry.contentMapping(
+            screenConfig.cropMode,
+            screenAspectRatio,
+            videoWidth,
+            videoHeight,
+        )
+        if (videoShader != null) {
+            mesh?.release()
+            mesh = Mesh.cinemaScreen(screenConfig, videoWidth, videoHeight)
+        }
     }
 
     private fun publish(state: RenderState, error: String? = null) {
@@ -233,11 +276,11 @@ internal class RenderLoop(
             #version 300 es
             layout(location = 0) in vec3 aPosition;
             layout(location = 1) in vec2 aTextureCoordinate;
-            uniform vec2 uScreenScale;
+            uniform mat4 uProjection;
             uniform mat4 uTextureTransform;
             out vec2 vTextureCoordinate;
             void main() {
-                gl_Position = vec4(aPosition.xy * uScreenScale, aPosition.z, 1.0);
+                gl_Position = uProjection * vec4(aPosition, 1.0);
                 vTextureCoordinate = (uTextureTransform * vec4(aTextureCoordinate, 0.0, 1.0)).xy;
             }
         """.trimIndent()
@@ -247,10 +290,25 @@ internal class RenderLoop(
             #extension GL_OES_EGL_image_external_essl3 : require
             precision mediump float;
             uniform samplerExternalOES uVideoTexture;
+            uniform vec2 uActiveScale;
+            uniform vec2 uSampleScale;
+            uniform float uBrightness;
+            uniform float uContrast;
             in vec2 vTextureCoordinate;
             out vec4 fragmentColor;
             void main() {
-                fragmentColor = texture(uVideoTexture, vTextureCoordinate);
+                vec2 centered = vTextureCoordinate - vec2(0.5);
+                vec2 activePosition = abs(centered) * 2.0;
+                if (activePosition.x > uActiveScale.x || activePosition.y > uActiveScale.y) {
+                    fragmentColor = vec4(0.0, 0.0, 0.0, 1.0);
+                    return;
+                }
+                vec2 normalized = centered / uActiveScale;
+                vec2 sampleCoordinate = normalized * uSampleScale + vec2(0.5);
+                vec4 color = texture(uVideoTexture, sampleCoordinate);
+                color.rgb = (color.rgb - vec3(0.5)) * uContrast + vec3(0.5);
+                color.rgb *= uBrightness;
+                fragmentColor = vec4(clamp(color.rgb, 0.0, 1.0), color.a);
             }
         """.trimIndent()
     }

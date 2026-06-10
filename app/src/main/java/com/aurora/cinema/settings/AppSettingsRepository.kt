@@ -1,6 +1,7 @@
 package com.aurora.cinema.settings
 
 import kotlinx.coroutines.flow.Flow
+import com.aurora.cinema.render.CinemaScreenConfig
 
 interface AppSettingsRepository {
     val settings: Flow<AppSettings>
@@ -10,4 +11,6 @@ interface AppSettingsRepository {
     suspend fun setComfortModeEnabled(enabled: Boolean)
 
     suspend fun setDefaultScreenDistanceMeters(distanceMeters: Float)
+
+    suspend fun setCinemaScreenConfig(config: CinemaScreenConfig)
 }

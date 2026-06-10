@@ -77,5 +77,13 @@ internal class Mesh(
                 ),
             )
         }
+
+        fun cinemaScreen(
+            config: CinemaScreenConfig,
+            videoWidth: Int,
+            videoHeight: Int,
+        ): Mesh {
+            return Mesh(ScreenGeometry.buildMesh(config, videoWidth, videoHeight))
+        }
     }
 }
