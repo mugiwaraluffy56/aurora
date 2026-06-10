@@ -75,6 +75,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -106,6 +107,8 @@ import com.aurora.cinema.render.StereoConfig
 import com.aurora.cinema.render.StereoRenderMode
 import com.aurora.cinema.settings.AppSettings
 import com.aurora.cinema.settings.AppSettingsRepository
+import com.aurora.cinema.tracking.AndroidHeadTracker
+import com.aurora.cinema.tracking.HeadPose
 import com.aurora.cinema.ui.theme.AuroraTheme
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -460,9 +463,17 @@ private fun PlayerScreen(
     onBrowseLibrary: () -> Unit,
 ) {
     val lifecycleOwner = LocalLifecycleOwner.current
+    val context = LocalContext.current
     val renderEngine = remember { RenderEngine() }
     val renderTelemetry by renderEngine.telemetry.collectAsStateWithLifecycle()
     val videoSurface by renderEngine.videoSurface.collectAsStateWithLifecycle()
+    var headPose by remember { mutableStateOf(HeadPose()) }
+    val headTracker = remember(context, renderEngine) {
+        AndroidHeadTracker(context.applicationContext) { pose ->
+            headPose = pose
+            renderEngine.setHeadPose(pose.viewMatrix)
+        }
+    }
 
     LaunchedEffect(videoSurface, appContainer.playerController) {
         appContainer.playerController.setVideoSurface(videoSurface)
@@ -480,13 +491,28 @@ private fun PlayerScreen(
         renderEngine.setStereoConfig(stereoConfig.copy(enabled = vrMode))
     }
 
+    LaunchedEffect(vrMode) {
+        if (vrMode) {
+            headTracker.start()
+        } else {
+            headTracker.stop()
+            renderEngine.setHeadPose(com.aurora.cinema.render.MatrixMath.identity())
+        }
+    }
+
     VrSystemUiEffect(active = vrMode)
 
     DisposableEffect(lifecycleOwner, renderEngine) {
         val observer = LifecycleEventObserver { _, event ->
             when (event) {
-                Lifecycle.Event.ON_RESUME -> renderEngine.resume()
-                Lifecycle.Event.ON_PAUSE -> renderEngine.pause()
+                Lifecycle.Event.ON_RESUME -> {
+                    renderEngine.resume()
+                    if (vrMode) headTracker.start()
+                }
+                Lifecycle.Event.ON_PAUSE -> {
+                    headTracker.stop()
+                    renderEngine.pause()
+                }
                 else -> Unit
             }
         }
@@ -496,9 +522,25 @@ private fun PlayerScreen(
         }
         onDispose {
             lifecycleOwner.lifecycle.removeObserver(observer)
+            headTracker.stop()
             appContainer.playerController.setVideoSurface(null)
             renderEngine.release()
             onVrModeChanged(false)
+        }
+    }
+
+    DisposableEffect(lifecycleOwner, headTracker, vrMode) {
+        val observer = LifecycleEventObserver { _, event ->
+            when (event) {
+                Lifecycle.Event.ON_RESUME -> if (vrMode) headTracker.start()
+                Lifecycle.Event.ON_PAUSE -> headTracker.stop()
+                else -> Unit
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose {
+            lifecycleOwner.lifecycle.removeObserver(observer)
+            if (vrMode) headTracker.stop()
         }
     }
 
@@ -519,7 +561,9 @@ private fun PlayerScreen(
                     color = MaterialTheme.colorScheme.surface.copy(alpha = 0.82f),
                     shape = RoundedCornerShape(8.dp),
                 ) {
-                    IconButton(onClick = renderEngine::recenter) {
+                    IconButton(onClick = {
+                        if (headTracker.available) headTracker.recenter() else renderEngine.recenter()
+                    }) {
                         Icon(Icons.Default.CenterFocusStrong, contentDescription = "Recenter view")
                     }
                 }
@@ -531,6 +575,20 @@ private fun PlayerScreen(
                         Icon(Icons.Default.Close, contentDescription = "Exit VR")
                     }
                 }
+            }
+            Surface(
+                modifier = Modifier
+                    .align(Alignment.BottomCenter)
+                    .padding(16.dp),
+                color = MaterialTheme.colorScheme.surface.copy(alpha = 0.72f),
+                shape = RoundedCornerShape(14.dp),
+            ) {
+                Text(
+                    text = if (headPose.tracking) "Head tracking active" else headPose.sensorName,
+                    modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp),
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
             }
         }
     } else {
@@ -551,6 +609,15 @@ private fun PlayerScreen(
                     actionIcon = Icons.Default.VideoLibrary,
                     onAction = onBrowseLibrary,
                 )
+                OutlinedButton(
+                    onClick = { onVrModeChanged(true) },
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(8.dp),
+                ) {
+                    Icon(Icons.Default.Fullscreen, contentDescription = null)
+                    Spacer(modifier = Modifier.size(8.dp))
+                    Text("Enter VR preview")
+                }
             } else {
                 Text(
                     text = activeVideo.displayName,
@@ -613,7 +680,11 @@ private fun PlayerScreen(
                 }
                 Spacer(modifier = Modifier.height(16.dp))
                 Text(
-                    text = if (renderTelemetry.videoSurfaceAttached) "Cinema surface connected" else "Preparing cinema surface",
+                    text = if (renderTelemetry.videoSurfaceAttached) {
+                        "Cinema surface connected · ${headTracker.sensorName}"
+                    } else {
+                        "Preparing cinema surface"
+                    },
                     style = MaterialTheme.typography.labelMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )

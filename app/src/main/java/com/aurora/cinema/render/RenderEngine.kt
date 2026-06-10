@@ -64,6 +64,10 @@ class RenderEngine {
         post { recenter() }
     }
 
+    fun setHeadPose(viewMatrix: FloatArray) {
+        post { setHeadPose(viewMatrix) }
+    }
+
     fun release() {
         if (released) return
         released = true

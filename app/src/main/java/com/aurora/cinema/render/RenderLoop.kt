@@ -113,6 +113,12 @@ internal class RenderLoop(
         updateCameraMatrices()
     }
 
+    fun setHeadPose(viewMatrix: FloatArray) {
+        if (viewMatrix.size != 16) return
+        recenterTransform = viewMatrix.copyOf()
+        updateCameraMatrices()
+    }
+
     fun release() {
         resumed = false
         frameClock.stop()
