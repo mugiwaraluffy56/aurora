@@ -135,6 +135,10 @@ import com.aurora.cinema.render.ScreenAspectRatio
 import com.aurora.cinema.render.ScreenCropMode
 import com.aurora.cinema.render.StereoConfig
 import com.aurora.cinema.render.StereoRenderMode
+import com.aurora.cinema.session.AndroidSessionEnvironment
+import com.aurora.cinema.session.SessionComfortPolicy
+import com.aurora.cinema.session.SessionComfortState
+import com.aurora.cinema.session.SessionEnvironment
 import com.aurora.cinema.settings.AppSettings
 import com.aurora.cinema.settings.AppSettingsRepository
 import com.aurora.cinema.tracking.AndroidHeadTracker
@@ -142,6 +146,7 @@ import com.aurora.cinema.tracking.HeadPose
 import com.aurora.cinema.ui.theme.AuroraTheme
 import com.aurora.cinema.ui.theme.AuroraGlass
 import com.aurora.cinema.ui.theme.AuroraControlTrack
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.launch
@@ -287,6 +292,7 @@ private fun AuroraShell(
                         appContainer = appContainer,
                         screenConfig = settings.cinemaScreenConfig,
                         stereoConfig = settings.stereoConfig,
+                        comfortModeEnabled = settings.comfortModeEnabled,
                         vrMode = vrMode,
                         onVrModeChanged = { vrMode = it },
                         onBrowseLibrary = { navigateTo(AppScreen.Library) },
@@ -953,6 +959,7 @@ private fun PlayerScreen(
     appContainer: AppContainer,
     screenConfig: CinemaScreenConfig,
     stereoConfig: StereoConfig,
+    comfortModeEnabled: Boolean,
     vrMode: Boolean,
     onVrModeChanged: (Boolean) -> Unit,
     onBrowseLibrary: () -> Unit,
@@ -963,6 +970,13 @@ private fun PlayerScreen(
     val renderTelemetry by renderEngine.telemetry.collectAsStateWithLifecycle()
     val videoSurface by renderEngine.videoSurface.collectAsStateWithLifecycle()
     val scope = rememberCoroutineScope()
+    var comfortState by remember {
+        mutableStateOf(
+            SessionComfortPolicy.evaluate(
+                SessionEnvironment(headsetMode = vrMode, comfortModeEnabled = comfortModeEnabled),
+            ),
+        )
+    }
     var headPose by remember { mutableStateOf(HeadPose()) }
     val headTracker = remember(context, renderEngine) {
         AndroidHeadTracker(context.applicationContext) { pose ->
@@ -979,8 +993,32 @@ private fun PlayerScreen(
         renderEngine.setVideoSize(playbackState.videoWidth, playbackState.videoHeight)
     }
 
-    LaunchedEffect(screenConfig) {
-        renderEngine.setCinemaScreenConfig(screenConfig)
+    LaunchedEffect(vrMode, comfortModeEnabled) {
+        while (vrMode) {
+            val environment = AndroidSessionEnvironment.read(
+                context = context,
+                headsetMode = true,
+                comfortModeEnabled = comfortModeEnabled,
+            )
+            comfortState = SessionComfortPolicy.evaluate(environment)
+            delay(30_000L)
+        }
+        comfortState = SessionComfortPolicy.evaluate(
+            SessionEnvironment(headsetMode = false, comfortModeEnabled = comfortModeEnabled),
+        )
+    }
+
+    LaunchedEffect(vrMode, comfortState.saveProgressIntervalMs) {
+        while (vrMode) {
+            delay(comfortState.saveProgressIntervalMs)
+            appContainer.playerController.saveProgress()
+        }
+    }
+
+    LaunchedEffect(screenConfig, comfortState.brightnessLimit) {
+        renderEngine.setCinemaScreenConfig(
+            screenConfig.copy(brightness = screenConfig.brightness.coerceAtMost(comfortState.brightnessLimit)),
+        )
     }
 
     LaunchedEffect(stereoConfig, vrMode) {
@@ -1006,6 +1044,7 @@ private fun PlayerScreen(
                     if (vrMode) headTracker.start()
                 }
                 Lifecycle.Event.ON_PAUSE -> {
+                    appContainer.playerController.saveProgress()
                     headTracker.stop()
                     renderEngine.pause()
                 }
@@ -1018,6 +1057,7 @@ private fun PlayerScreen(
         }
         onDispose {
             lifecycleOwner.lifecycle.removeObserver(observer)
+            appContainer.playerController.saveProgress()
             headTracker.stop()
             appContainer.playerController.setVideoSurface(null)
             renderEngine.release()
@@ -1096,6 +1136,23 @@ private fun PlayerScreen(
                 onControlsLockedChange = { vrControlsLocked = it },
                 onTarget = ::executeGazeTarget,
             )
+            comfortState.warning?.let { warning ->
+                Surface(
+                    modifier = Modifier
+                        .align(Alignment.TopStart)
+                        .padding(16.dp)
+                        .widthIn(max = 360.dp),
+                    color = MaterialTheme.colorScheme.surface.copy(alpha = 0.82f),
+                    shape = RoundedCornerShape(14.dp),
+                ) {
+                    Text(
+                        text = warning,
+                        modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp),
+                        style = MaterialTheme.typography.labelMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            }
         }
     } else {
         ScreenColumn(contentPadding = 0.dp) {
