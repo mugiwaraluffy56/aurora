@@ -141,6 +141,7 @@ import com.aurora.cinema.session.SessionComfortState
 import com.aurora.cinema.session.SessionEnvironment
 import com.aurora.cinema.settings.AppSettings
 import com.aurora.cinema.settings.AppSettingsRepository
+import com.aurora.cinema.telemetry.PerformanceDiagnosticsPolicy
 import com.aurora.cinema.tracking.AndroidHeadTracker
 import com.aurora.cinema.tracking.HeadPose
 import com.aurora.cinema.ui.theme.AuroraTheme
@@ -322,6 +323,8 @@ private fun AuroraShell(
                     AppScreen.Renderer -> RendererScreen(
                         settings = settings,
                         repository = appContainer.settingsRepository,
+                        appContainer = appContainer,
+                        playbackState = playbackState,
                     )
                     AppScreen.Calibration -> CalibrationScreen(
                         settings = settings,
@@ -1387,14 +1390,34 @@ private fun SettingsScreen(
 private fun RendererScreen(
     settings: AppSettings,
     repository: AppSettingsRepository,
+    appContainer: AppContainer,
+    playbackState: PlaybackState,
 ) {
     val lifecycleOwner = LocalLifecycleOwner.current
+    val context = LocalContext.current
     val renderEngine = remember { RenderEngine() }
     val telemetry by renderEngine.telemetry.collectAsStateWithLifecycle()
     val scope = rememberCoroutineScope()
+    val codecSummaries = remember { appContainer.codecCapabilityService.summarizeDeviceCodecs() }
     var diagnosticMeshEnabled by rememberSaveable { mutableStateOf(false) }
     var stereoPreviewEnabled by rememberSaveable { mutableStateOf(false) }
+    var sessionEnvironment by remember {
+        mutableStateOf(
+            SessionEnvironment(
+                headsetMode = stereoPreviewEnabled,
+                comfortModeEnabled = settings.comfortModeEnabled,
+            ),
+        )
+    }
     var draftConfig by remember { mutableStateOf(settings.cinemaScreenConfig) }
+    val diagnostics = remember(telemetry, playbackState, sessionEnvironment, codecSummaries) {
+        PerformanceDiagnosticsPolicy.evaluate(
+            renderTelemetry = telemetry,
+            playbackState = playbackState,
+            environment = sessionEnvironment,
+            codecs = codecSummaries,
+        )
+    }
 
     LaunchedEffect(settings.cinemaScreenConfig) {
         draftConfig = settings.cinemaScreenConfig
@@ -1410,6 +1433,17 @@ private fun RendererScreen(
 
     LaunchedEffect(settings.headsetProfile) {
         renderEngine.setHeadsetProfile(settings.headsetProfile)
+    }
+
+    LaunchedEffect(stereoPreviewEnabled, settings.comfortModeEnabled) {
+        while (true) {
+            sessionEnvironment = AndroidSessionEnvironment.read(
+                context = context,
+                headsetMode = stereoPreviewEnabled,
+                comfortModeEnabled = settings.comfortModeEnabled,
+            )
+            delay(30_000L)
+        }
     }
 
     DisposableEffect(lifecycleOwner, renderEngine) {
@@ -1599,8 +1633,42 @@ private fun RendererScreen(
         StatusRow(label = "Frame time", value = "%.2f ms".format(telemetry.averageFrameTimeMs))
         StatusRow(label = "Rendered frames", value = telemetry.renderedFrames.toString())
         StatusRow(label = "Estimated drops", value = telemetry.estimatedDroppedFrames.toString())
+        StatusRow(label = "Video frame backlog", value = diagnostics.estimatedVideoFrameBacklog.toString())
+        StatusRow(label = "Performance mode", value = diagnostics.mode.label)
+        StatusRow(label = "Render health", value = diagnostics.renderHealth)
+        StatusRow(label = "Decoder health", value = diagnostics.decoderHealth)
+        StatusRow(
+            label = "Thermal/battery",
+            value = "${sessionEnvironment.thermalStatus.name}, ${sessionEnvironment.batteryPercent}%",
+        )
+        StatusRow(
+            label = "Degradation",
+            value = if (diagnostics.overlayEffectsAllowed) {
+                "Full quality"
+            } else {
+                "Brightness ${(diagnostics.brightnessLimit * 100).toInt()}%, reduced effects"
+            },
+        )
         StatusRow(label = "GL renderer", value = telemetry.glRenderer.ifBlank { "Waiting" })
         StatusRow(label = "GL version", value = telemetry.glVersion.ifBlank { "Waiting" })
+        diagnostics.warning?.let { warning ->
+            Spacer(modifier = Modifier.height(8.dp))
+            Text(
+                text = warning,
+                color = MaterialTheme.colorScheme.error,
+                style = MaterialTheme.typography.bodyMedium,
+            )
+        }
+        Spacer(modifier = Modifier.height(24.dp))
+        SectionLabel("RELEASE PERFORMANCE CHECKLIST")
+        diagnostics.profilerChecklist.forEach { item ->
+            Text(
+                text = "- $item",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(vertical = 3.dp),
+            )
+        }
         telemetry.lastError?.let { error ->
             Text(
                 text = error,
