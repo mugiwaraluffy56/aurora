@@ -1,5 +1,9 @@
 package com.aurora.cinema.ui
 
+import android.app.Activity
+import android.content.Context
+import android.content.ContextWrapper
+import android.content.pm.ActivityInfo
 import android.net.Uri
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -24,9 +28,12 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.CenterFocusStrong
 import androidx.compose.material.icons.filled.ChevronRight
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.FolderOpen
 import androidx.compose.material.icons.filled.Forward10
+import androidx.compose.material.icons.filled.Fullscreen
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
@@ -68,6 +75,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.tooling.preview.Preview
@@ -76,6 +84,9 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
+import androidx.core.view.WindowCompat
+import androidx.core.view.WindowInsetsCompat
+import androidx.core.view.WindowInsetsControllerCompat
 import com.aurora.cinema.app.AppContainer
 import com.aurora.cinema.core.nativebridge.NativeCore
 import com.aurora.cinema.library.ImportResult
@@ -91,6 +102,8 @@ import com.aurora.cinema.render.RenderEngine
 import com.aurora.cinema.render.RenderState
 import com.aurora.cinema.render.ScreenAspectRatio
 import com.aurora.cinema.render.ScreenCropMode
+import com.aurora.cinema.render.StereoConfig
+import com.aurora.cinema.render.StereoRenderMode
 import com.aurora.cinema.settings.AppSettings
 import com.aurora.cinema.settings.AppSettingsRepository
 import com.aurora.cinema.ui.theme.AuroraTheme
@@ -131,6 +144,7 @@ private fun AuroraShell(
     var selectedScreen by rememberSaveable { mutableStateOf(AppScreen.Library) }
     var previousScreen by rememberSaveable { mutableStateOf(AppScreen.Library) }
     var selectedVideoId by rememberSaveable { mutableStateOf<Long?>(null) }
+    var vrMode by rememberSaveable { mutableStateOf(false) }
     val videos by appContainer.libraryRepository.videos.collectAsStateWithLifecycle(initialValue = emptyList())
     val playbackState by appContainer.playerController.state.collectAsStateWithLifecycle()
     val scope = rememberCoroutineScope()
@@ -163,7 +177,7 @@ private fun AuroraShell(
 
     Scaffold(
         topBar = {
-            TopAppBar(
+            if (!vrMode) TopAppBar(
                 title = {
                     Text(
                         text = if (selectedScreen == AppScreen.Library) "Aurora" else selectedScreen.title,
@@ -187,7 +201,7 @@ private fun AuroraShell(
             )
         },
         bottomBar = {
-            if (!isSecondaryScreen) {
+            if (!isSecondaryScreen && !vrMode) {
                 NavigationBar(containerColor = MaterialTheme.colorScheme.surface) {
                     primaryScreens.forEach { screen ->
                     NavigationBarItem(
@@ -226,6 +240,9 @@ private fun AuroraShell(
                     playbackState = playbackState,
                     appContainer = appContainer,
                     screenConfig = settings.cinemaScreenConfig,
+                    stereoConfig = settings.stereoConfig,
+                    vrMode = vrMode,
+                    onVrModeChanged = { vrMode = it },
                     onBrowseLibrary = { navigateTo(AppScreen.Library) },
                 )
                 AppScreen.VideoDetails -> VideoDetailsScreen(
@@ -254,7 +271,10 @@ private fun AuroraShell(
                     settings = settings,
                     repository = appContainer.settingsRepository,
                 )
-                AppScreen.Calibration -> CalibrationScreen()
+                AppScreen.Calibration -> CalibrationScreen(
+                    settings = settings,
+                    repository = appContainer.settingsRepository,
+                )
                 AppScreen.About -> AboutScreen(appContainer = appContainer)
             }
         }
@@ -434,6 +454,9 @@ private fun PlayerScreen(
     playbackState: PlaybackState,
     appContainer: AppContainer,
     screenConfig: CinemaScreenConfig,
+    stereoConfig: StereoConfig,
+    vrMode: Boolean,
+    onVrModeChanged: (Boolean) -> Unit,
     onBrowseLibrary: () -> Unit,
 ) {
     val lifecycleOwner = LocalLifecycleOwner.current
@@ -453,6 +476,12 @@ private fun PlayerScreen(
         renderEngine.setCinemaScreenConfig(screenConfig)
     }
 
+    LaunchedEffect(stereoConfig, vrMode) {
+        renderEngine.setStereoConfig(stereoConfig.copy(enabled = vrMode))
+    }
+
+    VrSystemUiEffect(active = vrMode)
+
     DisposableEffect(lifecycleOwner, renderEngine) {
         val observer = LifecycleEventObserver { _, event ->
             when (event) {
@@ -469,11 +498,43 @@ private fun PlayerScreen(
             lifecycleOwner.lifecycle.removeObserver(observer)
             appContainer.playerController.setVideoSurface(null)
             renderEngine.release()
+            onVrModeChanged(false)
         }
     }
 
-    ScreenColumn(contentPadding = 0.dp) {
-        val activeVideo = playbackState.selectedVideo ?: selectedVideo
+    val activeVideo = playbackState.selectedVideo ?: selectedVideo
+    if (vrMode) {
+        Box(modifier = Modifier.fillMaxSize()) {
+            AndroidView(
+                modifier = Modifier.fillMaxSize(),
+                factory = { context -> AuroraRenderView(context, renderEngine = renderEngine) },
+            )
+            Row(
+                modifier = Modifier
+                    .align(Alignment.TopEnd)
+                    .padding(16.dp),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                Surface(
+                    color = MaterialTheme.colorScheme.surface.copy(alpha = 0.82f),
+                    shape = RoundedCornerShape(8.dp),
+                ) {
+                    IconButton(onClick = renderEngine::recenter) {
+                        Icon(Icons.Default.CenterFocusStrong, contentDescription = "Recenter view")
+                    }
+                }
+                Surface(
+                    color = MaterialTheme.colorScheme.surface.copy(alpha = 0.82f),
+                    shape = RoundedCornerShape(8.dp),
+                ) {
+                    IconButton(onClick = { onVrModeChanged(false) }) {
+                        Icon(Icons.Default.Close, contentDescription = "Exit VR")
+                    }
+                }
+            }
+        }
+    } else {
+        ScreenColumn(contentPadding = 0.dp) {
         AndroidView(
             modifier = Modifier
                 .fillMaxWidth()
@@ -541,6 +602,16 @@ private fun PlayerScreen(
                     )
                 }
                 Spacer(modifier = Modifier.height(24.dp))
+                Button(
+                    onClick = { onVrModeChanged(true) },
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(8.dp),
+                ) {
+                    Icon(Icons.Default.Fullscreen, contentDescription = null)
+                    Spacer(modifier = Modifier.size(8.dp))
+                    Text("Enter VR")
+                }
+                Spacer(modifier = Modifier.height(16.dp))
                 Text(
                     text = if (renderTelemetry.videoSurfaceAttached) "Cinema surface connected" else "Preparing cinema surface",
                     style = MaterialTheme.typography.labelMedium,
@@ -548,6 +619,7 @@ private fun PlayerScreen(
                 )
             }
         }
+    }
     }
 }
 
@@ -696,6 +768,7 @@ private fun RendererScreen(
     val telemetry by renderEngine.telemetry.collectAsStateWithLifecycle()
     val scope = rememberCoroutineScope()
     var diagnosticMeshEnabled by rememberSaveable { mutableStateOf(false) }
+    var stereoPreviewEnabled by rememberSaveable { mutableStateOf(false) }
     var draftConfig by remember { mutableStateOf(settings.cinemaScreenConfig) }
 
     LaunchedEffect(settings.cinemaScreenConfig) {
@@ -704,6 +777,10 @@ private fun RendererScreen(
 
     LaunchedEffect(draftConfig) {
         renderEngine.setCinemaScreenConfig(draftConfig)
+    }
+
+    LaunchedEffect(settings.stereoConfig, stereoPreviewEnabled) {
+        renderEngine.setStereoConfig(settings.stereoConfig.copy(enabled = stereoPreviewEnabled))
     }
 
     DisposableEffect(lifecycleOwner, renderEngine) {
@@ -752,6 +829,13 @@ private fun RendererScreen(
             body = "Draw a flat test screen to verify shader, buffer, and swap-chain behavior.",
             checked = diagnosticMeshEnabled,
             onCheckedChange = { diagnosticMeshEnabled = it },
+        )
+        Spacer(modifier = Modifier.height(12.dp))
+        SettingSwitchRow(
+            label = "Stereo preview",
+            body = "Render independent left and right eye views",
+            checked = stereoPreviewEnabled,
+            onCheckedChange = { stereoPreviewEnabled = it },
         )
         Spacer(modifier = Modifier.height(24.dp))
         SectionLabel("SCREEN PRESET")
@@ -897,15 +981,61 @@ private fun RendererScreen(
 }
 
 @Composable
-private fun CalibrationScreen() {
+private fun CalibrationScreen(
+    settings: AppSettings,
+    repository: AppSettingsRepository,
+) {
+    val scope = rememberCoroutineScope()
+    var draft by remember { mutableStateOf(settings.stereoConfig) }
+
+    LaunchedEffect(settings.stereoConfig) {
+        draft = settings.stereoConfig
+    }
+
     ScreenColumn {
         PageIntro(
             title = "Headset profile",
-            subtitle = "Calibration controls will be enabled with the stereoscopic rendering phase.",
+            subtitle = "Tune the stereo camera for your phone and headset.",
         )
-        StatusRow(label = "Profile", value = "Default mobile headset")
-        StatusRow(label = "IPD", value = "Not calibrated")
-        StatusRow(label = "Distortion", value = "Not calibrated")
+        SectionLabel("STEREO CAMERA")
+        CinemaConfigSlider(
+            label = "Interpupillary distance",
+            valueLabel = "${(draft.ipdMeters * 1000).toInt()} mm",
+            value = draft.ipdMeters,
+            range = 0.04f..0.09f,
+            onValueChange = { draft = draft.copy(ipdMeters = it) },
+            onValueChangeFinished = {
+                scope.launch { repository.setStereoConfig(draft) }
+            },
+        )
+        CinemaConfigSlider(
+            label = "Field of view",
+            valueLabel = "${draft.fieldOfViewDegrees.toInt()}°",
+            value = draft.fieldOfViewDegrees,
+            range = 60f..110f,
+            onValueChange = { draft = draft.copy(fieldOfViewDegrees = it) },
+            onValueChangeFinished = {
+                scope.launch { repository.setStereoConfig(draft) }
+            },
+        )
+        Spacer(modifier = Modifier.height(16.dp))
+        Text("Eye rendering", style = MaterialTheme.typography.titleMedium)
+        Spacer(modifier = Modifier.height(8.dp))
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            StereoRenderMode.entries.forEach { mode ->
+                FilterChip(
+                    selected = draft.renderMode == mode,
+                    onClick = {
+                        draft = draft.copy(renderMode = mode)
+                        scope.launch { repository.setStereoConfig(draft) }
+                    },
+                    label = { Text(mode.label) },
+                )
+            }
+        }
+        Spacer(modifier = Modifier.height(24.dp))
+        SectionLabel("NEXT CALIBRATION STAGE")
+        StatusRow(label = "Lens distortion", value = "Phase 10")
     }
 }
 
@@ -963,6 +1093,37 @@ private fun ScreenColumn(
                 .widthIn(max = 640.dp),
             content = content,
         )
+    }
+}
+
+@Composable
+private fun VrSystemUiEffect(active: Boolean) {
+    val view = LocalView.current
+    DisposableEffect(active, view) {
+        if (!active) {
+            onDispose { }
+        } else {
+            val activity = view.context.findActivity()
+            val previousOrientation = activity?.requestedOrientation
+            activity?.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE
+            activity?.window?.let { window ->
+                WindowCompat.setDecorFitsSystemWindows(window, false)
+                WindowInsetsControllerCompat(window, view).apply {
+                    hide(WindowInsetsCompat.Type.systemBars())
+                    systemBarsBehavior =
+                        WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
+                }
+            }
+            onDispose {
+                activity?.window?.let { window ->
+                    WindowInsetsControllerCompat(window, view).show(WindowInsetsCompat.Type.systemBars())
+                    WindowCompat.setDecorFitsSystemWindows(window, false)
+                }
+                if (previousOrientation != null) {
+                    activity.requestedOrientation = previousOrientation
+                }
+            }
+        }
     }
 }
 
@@ -1369,6 +1530,14 @@ private fun Long.timeLabel(): String {
     }
 }
 
+private tailrec fun Context.findActivity(): Activity? {
+    return when (this) {
+        is Activity -> this
+        is ContextWrapper -> baseContext.findActivity()
+        else -> null
+    }
+}
+
 @Preview(showBackground = true)
 @Composable
 private fun AuroraAppPreview() {
@@ -1426,6 +1595,8 @@ private fun AuroraAppPreview() {
                     override suspend fun setDefaultScreenDistanceMeters(distanceMeters: Float) = Unit
 
                     override suspend fun setCinemaScreenConfig(config: CinemaScreenConfig) = Unit
+
+                    override suspend fun setStereoConfig(config: StereoConfig) = Unit
                 }
             },
         )

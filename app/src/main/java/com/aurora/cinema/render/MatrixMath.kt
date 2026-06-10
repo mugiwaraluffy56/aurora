@@ -33,6 +33,14 @@ object MatrixMath {
         )
     }
 
+    fun translation(x: Float, y: Float, z: Float): FloatArray {
+        return identity().apply {
+            this[12] = x
+            this[13] = y
+            this[14] = z
+        }
+    }
+
     fun multiply(left: FloatArray, right: FloatArray): FloatArray {
         require(left.size == MATRIX_SIZE && right.size == MATRIX_SIZE)
         return FloatArray(MATRIX_SIZE) { index ->

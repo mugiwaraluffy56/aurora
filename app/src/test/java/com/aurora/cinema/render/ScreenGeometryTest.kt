@@ -1,6 +1,7 @@
 package com.aurora.cinema.render
 
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class ScreenGeometryTest {
@@ -81,7 +82,7 @@ class ScreenGeometryTest {
         assertEquals(8 * 6 * 5, vertices.size)
         val leftEdgeZ = vertices[2]
         val centerSegmentZ = vertices[(4 * 6 * 5) + 2]
-        assert(leftEdgeZ < centerSegmentZ)
+        assertTrue(leftEdgeZ < centerSegmentZ)
     }
 
     @Test

@@ -56,6 +56,14 @@ class RenderEngine {
         post { setCinemaScreenConfig(config) }
     }
 
+    fun setStereoConfig(config: StereoConfig) {
+        post { setStereoConfig(config) }
+    }
+
+    fun recenter() {
+        post { recenter() }
+    }
+
     fun release() {
         if (released) return
         released = true

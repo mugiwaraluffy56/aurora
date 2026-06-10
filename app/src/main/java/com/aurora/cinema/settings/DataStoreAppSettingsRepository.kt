@@ -11,6 +11,8 @@ import androidx.datastore.preferences.preferencesDataStore
 import com.aurora.cinema.render.CinemaScreenConfig
 import com.aurora.cinema.render.ScreenAspectRatio
 import com.aurora.cinema.render.ScreenCropMode
+import com.aurora.cinema.render.StereoConfig
+import com.aurora.cinema.render.StereoRenderMode
 import java.io.IOException
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.catch
@@ -51,6 +53,13 @@ class DataStoreAppSettingsRepository(
                     cropMode = preferences[Keys.screenCropMode]
                         .enumValueOrDefault(ScreenCropMode.Fit),
                 ),
+                stereoConfig = StereoConfig(
+                    enabled = preferences[Keys.stereoEnabled] ?: false,
+                    ipdMeters = preferences[Keys.stereoIpd] ?: 0.064f,
+                    fieldOfViewDegrees = preferences[Keys.stereoFov] ?: 90f,
+                    renderMode = preferences[Keys.stereoRenderMode]
+                        .enumValueOrDefault(StereoRenderMode.Direct),
+                ),
             )
         }
 
@@ -86,6 +95,15 @@ class DataStoreAppSettingsRepository(
         }
     }
 
+    override suspend fun setStereoConfig(config: StereoConfig) {
+        dataStore.edit { preferences ->
+            preferences[Keys.stereoEnabled] = config.enabled
+            preferences[Keys.stereoIpd] = config.ipdMeters.coerceIn(0.04f, 0.09f)
+            preferences[Keys.stereoFov] = config.fieldOfViewDegrees.coerceIn(60f, 110f)
+            preferences[Keys.stereoRenderMode] = config.renderMode.name
+        }
+    }
+
     private object Keys {
         val firstRunAcknowledged = booleanPreferencesKey("first_run_acknowledged")
         val comfortModeEnabled = booleanPreferencesKey("comfort_mode_enabled")
@@ -99,6 +117,10 @@ class DataStoreAppSettingsRepository(
         val screenBrightness = floatPreferencesKey("screen_brightness")
         val screenContrast = floatPreferencesKey("screen_contrast")
         val screenCropMode = stringPreferencesKey("screen_crop_mode")
+        val stereoEnabled = booleanPreferencesKey("stereo_enabled")
+        val stereoIpd = floatPreferencesKey("stereo_ipd")
+        val stereoFov = floatPreferencesKey("stereo_fov")
+        val stereoRenderMode = stringPreferencesKey("stereo_render_mode")
     }
 }
 
