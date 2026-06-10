@@ -9,6 +9,7 @@ import androidx.datastore.preferences.core.floatPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
 import com.aurora.cinema.render.CinemaScreenConfig
+import com.aurora.cinema.render.HeadsetProfile
 import com.aurora.cinema.render.ScreenAspectRatio
 import com.aurora.cinema.render.ScreenCropMode
 import com.aurora.cinema.render.StereoConfig
@@ -60,6 +61,20 @@ class DataStoreAppSettingsRepository(
                     renderMode = preferences[Keys.stereoRenderMode]
                         .enumValueOrDefault(StereoRenderMode.Direct),
                 ),
+                headsetProfile = HeadsetProfile(
+                    id = preferences[Keys.headsetId] ?: "default",
+                    name = preferences[Keys.headsetName] ?: "Default headset",
+                    ipdMeters = preferences[Keys.headsetIpd] ?: 0.064f,
+                    fovDegrees = preferences[Keys.headsetFov] ?: 90f,
+                    screenToLensDistance = preferences[Keys.screenToLensDistance] ?: 0.04f,
+                    interLensDistance = preferences[Keys.interLensDistance] ?: 0.064f,
+                    verticalLensOffset = preferences[Keys.verticalLensOffset] ?: 0f,
+                    distortionK1 = preferences[Keys.distortionK1] ?: 0.22f,
+                    distortionK2 = preferences[Keys.distortionK2] ?: 0.24f,
+                    distortionK3 = preferences[Keys.distortionK3] ?: 0f,
+                    chromaticAberrationRed = preferences[Keys.chromaticAberrationRed] ?: 0f,
+                    chromaticAberrationBlue = preferences[Keys.chromaticAberrationBlue] ?: 0f,
+                ).clamped(),
             )
         }
 
@@ -104,6 +119,24 @@ class DataStoreAppSettingsRepository(
         }
     }
 
+    override suspend fun setHeadsetProfile(profile: HeadsetProfile) {
+        val clamped = profile.clamped()
+        dataStore.edit { preferences ->
+            preferences[Keys.headsetId] = clamped.id
+            preferences[Keys.headsetName] = clamped.name
+            preferences[Keys.headsetIpd] = clamped.ipdMeters
+            preferences[Keys.headsetFov] = clamped.fovDegrees
+            preferences[Keys.screenToLensDistance] = clamped.screenToLensDistance
+            preferences[Keys.interLensDistance] = clamped.interLensDistance
+            preferences[Keys.verticalLensOffset] = clamped.verticalLensOffset
+            preferences[Keys.distortionK1] = clamped.distortionK1
+            preferences[Keys.distortionK2] = clamped.distortionK2
+            preferences[Keys.distortionK3] = clamped.distortionK3
+            preferences[Keys.chromaticAberrationRed] = clamped.chromaticAberrationRed
+            preferences[Keys.chromaticAberrationBlue] = clamped.chromaticAberrationBlue
+        }
+    }
+
     private object Keys {
         val firstRunAcknowledged = booleanPreferencesKey("first_run_acknowledged")
         val comfortModeEnabled = booleanPreferencesKey("comfort_mode_enabled")
@@ -121,6 +154,18 @@ class DataStoreAppSettingsRepository(
         val stereoIpd = floatPreferencesKey("stereo_ipd")
         val stereoFov = floatPreferencesKey("stereo_fov")
         val stereoRenderMode = stringPreferencesKey("stereo_render_mode")
+        val headsetId = stringPreferencesKey("headset_id")
+        val headsetName = stringPreferencesKey("headset_name")
+        val headsetIpd = floatPreferencesKey("headset_ipd")
+        val headsetFov = floatPreferencesKey("headset_fov")
+        val screenToLensDistance = floatPreferencesKey("screen_to_lens_distance")
+        val interLensDistance = floatPreferencesKey("inter_lens_distance")
+        val verticalLensOffset = floatPreferencesKey("vertical_lens_offset")
+        val distortionK1 = floatPreferencesKey("distortion_k1")
+        val distortionK2 = floatPreferencesKey("distortion_k2")
+        val distortionK3 = floatPreferencesKey("distortion_k3")
+        val chromaticAberrationRed = floatPreferencesKey("chromatic_aberration_red")
+        val chromaticAberrationBlue = floatPreferencesKey("chromatic_aberration_blue")
     }
 }
 

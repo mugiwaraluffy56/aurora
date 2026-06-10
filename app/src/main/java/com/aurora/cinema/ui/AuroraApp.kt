@@ -1340,6 +1340,10 @@ private fun RendererScreen(
         renderEngine.setStereoConfig(settings.stereoConfig.copy(enabled = stereoPreviewEnabled))
     }
 
+    LaunchedEffect(settings.headsetProfile) {
+        renderEngine.setHeadsetProfile(settings.headsetProfile)
+    }
+
     DisposableEffect(lifecycleOwner, renderEngine) {
         val observer = LifecycleEventObserver { _, event ->
             when (event) {
@@ -1546,9 +1550,13 @@ private fun CalibrationScreen(
 ) {
     val scope = rememberCoroutineScope()
     var draft by remember { mutableStateOf(settings.stereoConfig) }
+    var profile by remember { mutableStateOf(settings.headsetProfile) }
 
     LaunchedEffect(settings.stereoConfig) {
         draft = settings.stereoConfig
+    }
+    LaunchedEffect(settings.headsetProfile) {
+        profile = settings.headsetProfile
     }
 
     ScreenColumn {
@@ -1559,22 +1567,34 @@ private fun CalibrationScreen(
         SectionLabel("STEREO CAMERA")
         CinemaConfigSlider(
             label = "Interpupillary distance",
-            valueLabel = "${(draft.ipdMeters * 1000).toInt()} mm",
-            value = draft.ipdMeters,
+            valueLabel = "${(profile.ipdMeters * 1000).toInt()} mm",
+            value = profile.ipdMeters,
             range = 0.04f..0.09f,
-            onValueChange = { draft = draft.copy(ipdMeters = it) },
+            onValueChange = {
+                profile = profile.copy(ipdMeters = it)
+                draft = draft.copy(ipdMeters = it)
+            },
             onValueChangeFinished = {
-                scope.launch { repository.setStereoConfig(draft) }
+                scope.launch {
+                    repository.setStereoConfig(draft)
+                    repository.setHeadsetProfile(profile)
+                }
             },
         )
         CinemaConfigSlider(
             label = "Field of view",
-            valueLabel = "${draft.fieldOfViewDegrees.toInt()}°",
-            value = draft.fieldOfViewDegrees,
+            valueLabel = "${profile.fovDegrees.toInt()}°",
+            value = profile.fovDegrees,
             range = 60f..110f,
-            onValueChange = { draft = draft.copy(fieldOfViewDegrees = it) },
+            onValueChange = {
+                profile = profile.copy(fovDegrees = it)
+                draft = draft.copy(fieldOfViewDegrees = it)
+            },
             onValueChangeFinished = {
-                scope.launch { repository.setStereoConfig(draft) }
+                scope.launch {
+                    repository.setStereoConfig(draft)
+                    repository.setHeadsetProfile(profile)
+                }
             },
         )
         Spacer(modifier = Modifier.height(16.dp))
@@ -1594,8 +1614,55 @@ private fun CalibrationScreen(
             }
         }
         Spacer(modifier = Modifier.height(24.dp))
-        SectionLabel("NEXT CALIBRATION STAGE")
-        StatusRow(label = "Lens distortion", value = "Phase 10")
+        SectionLabel("LENS DISTORTION")
+        CinemaConfigSlider(
+            label = "Lens center offset",
+            valueLabel = "%.2f".format(profile.verticalLensOffset),
+            value = profile.verticalLensOffset,
+            range = -0.2f..0.2f,
+            onValueChange = { profile = profile.copy(verticalLensOffset = it) },
+            onValueChangeFinished = { scope.launch { repository.setHeadsetProfile(profile) } },
+        )
+        CinemaConfigSlider(
+            label = "Barrel K1",
+            valueLabel = "%.2f".format(profile.distortionK1),
+            value = profile.distortionK1,
+            range = -1f..1f,
+            onValueChange = { profile = profile.copy(distortionK1 = it) },
+            onValueChangeFinished = { scope.launch { repository.setHeadsetProfile(profile) } },
+        )
+        CinemaConfigSlider(
+            label = "Barrel K2",
+            valueLabel = "%.2f".format(profile.distortionK2),
+            value = profile.distortionK2,
+            range = -1f..1f,
+            onValueChange = { profile = profile.copy(distortionK2 = it) },
+            onValueChangeFinished = { scope.launch { repository.setHeadsetProfile(profile) } },
+        )
+        CinemaConfigSlider(
+            label = "Barrel K3",
+            valueLabel = "%.2f".format(profile.distortionK3),
+            value = profile.distortionK3,
+            range = -1f..1f,
+            onValueChange = { profile = profile.copy(distortionK3 = it) },
+            onValueChangeFinished = { scope.launch { repository.setHeadsetProfile(profile) } },
+        )
+        CinemaConfigSlider(
+            label = "Red channel shift",
+            valueLabel = "%.3f".format(profile.chromaticAberrationRed),
+            value = profile.chromaticAberrationRed,
+            range = -0.02f..0.02f,
+            onValueChange = { profile = profile.copy(chromaticAberrationRed = it) },
+            onValueChangeFinished = { scope.launch { repository.setHeadsetProfile(profile) } },
+        )
+        CinemaConfigSlider(
+            label = "Blue channel shift",
+            valueLabel = "%.3f".format(profile.chromaticAberrationBlue),
+            value = profile.chromaticAberrationBlue,
+            range = -0.02f..0.02f,
+            onValueChange = { profile = profile.copy(chromaticAberrationBlue = it) },
+            onValueChangeFinished = { scope.launch { repository.setHeadsetProfile(profile) } },
+        )
     }
 }
 
@@ -2200,6 +2267,8 @@ private fun AuroraAppPreview() {
                     override suspend fun setCinemaScreenConfig(config: CinemaScreenConfig) = Unit
 
                     override suspend fun setStereoConfig(config: StereoConfig) = Unit
+
+                    override suspend fun setHeadsetProfile(profile: com.aurora.cinema.render.HeadsetProfile) = Unit
                 }
             },
         )

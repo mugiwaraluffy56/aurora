@@ -1,6 +1,7 @@
 package com.aurora.cinema.settings
 
 import com.aurora.cinema.render.CinemaScreenConfig
+import com.aurora.cinema.render.HeadsetProfile
 import com.aurora.cinema.render.StereoConfig
 
 data class AppSettings(
@@ -9,4 +10,5 @@ data class AppSettings(
     val defaultScreenDistanceMeters: Float = 8.0f,
     val cinemaScreenConfig: CinemaScreenConfig = CinemaScreenConfig(),
     val stereoConfig: StereoConfig = StereoConfig(),
+    val headsetProfile: HeadsetProfile = HeadsetProfile(),
 )

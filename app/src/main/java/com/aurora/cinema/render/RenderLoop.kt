@@ -29,6 +29,7 @@ internal class RenderLoop(
     private var videoHeight = 0
     private var screenConfig = CinemaScreenConfig()
     private var stereoConfig = StereoConfig()
+    private var headsetProfile = HeadsetProfile()
     private var screenAspectRatio = 16f / 9f
     private var projectionMatrix = MatrixMath.identity()
     private var leftEyeMatrix = MatrixMath.identity()
@@ -43,6 +44,9 @@ internal class RenderLoop(
     private var brightnessUniform = -1
     private var contrastUniform = -1
     private var compositeTextureUniform = -1
+    private var distortionCoefficientsUniform = -1
+    private var lensCenterUniform = -1
+    private var chromaticAberrationUniform = -1
     private var renderedFrames = 0L
     private var droppedFrames = 0L
 
@@ -108,6 +112,13 @@ internal class RenderLoop(
         if (targetsChanged) releaseEyeTargets()
     }
 
+    fun setHeadsetProfile(profile: HeadsetProfile) {
+        val clamped = profile.clamped()
+        if (headsetProfile == clamped) return
+        headsetProfile = clamped
+        updateCameraMatrices()
+    }
+
     fun recenter() {
         recenterTransform = MatrixMath.identity()
         updateCameraMatrices()
@@ -153,6 +164,18 @@ internal class RenderLoop(
                 compositeTextureUniform = GLES30.glGetUniformLocation(
                     checkNotNull(compositeShader).id,
                     "uTexture",
+                )
+                distortionCoefficientsUniform = GLES30.glGetUniformLocation(
+                    checkNotNull(compositeShader).id,
+                    "uDistortion",
+                )
+                lensCenterUniform = GLES30.glGetUniformLocation(
+                    checkNotNull(compositeShader).id,
+                    "uLensCenter",
+                )
+                chromaticAberrationUniform = GLES30.glGetUniformLocation(
+                    checkNotNull(compositeShader).id,
+                    "uChromaticAberration",
                 )
                 compositeMesh = Mesh.screenQuad()
                 updateCameraMatrices()
@@ -237,19 +260,25 @@ internal class RenderLoop(
         brightnessUniform = -1
         contrastUniform = -1
         compositeTextureUniform = -1
+        distortionCoefficientsUniform = -1
+        lensCenterUniform = -1
+        chromaticAberrationUniform = -1
         egl.release()
     }
 
     private fun updateCameraMatrices() {
         if (width <= 0 || height <= 0) return
         projectionMatrix = MatrixMath.perspective(
-            verticalFieldOfViewDegrees = stereoConfig.fieldOfViewDegrees,
+            verticalFieldOfViewDegrees = headsetProfile.fovDegrees,
             aspectRatio = width.toFloat() / height,
             nearPlane = stereoConfig.nearPlane,
             farPlane = stereoConfig.farPlane,
         )
         val eyes = StereoCameraRig.eyeMatrices(
-            config = stereoConfig,
+            config = stereoConfig.copy(
+                ipdMeters = headsetProfile.ipdMeters,
+                fieldOfViewDegrees = headsetProfile.fovDegrees,
+            ),
             eyeAspectRatio = (width / 2f) / height,
             recenterTransform = recenterTransform,
         )
@@ -334,6 +363,18 @@ internal class RenderLoop(
         shader.use()
         GLES30.glActiveTexture(GLES30.GL_TEXTURE0)
         GLES30.glUniform1i(compositeTextureUniform, 0)
+        GLES30.glUniform3f(
+            distortionCoefficientsUniform,
+            headsetProfile.distortionK1,
+            headsetProfile.distortionK2,
+            headsetProfile.distortionK3,
+        )
+        GLES30.glUniform2f(lensCenterUniform, 0.5f, 0.5f + headsetProfile.verticalLensOffset)
+        GLES30.glUniform2f(
+            chromaticAberrationUniform,
+            headsetProfile.chromaticAberrationRed,
+            headsetProfile.chromaticAberrationBlue,
+        )
         GLES30.glViewport(0, 0, eyeWidth, height)
         GLES30.glBindTexture(GLES30.GL_TEXTURE_2D, leftEyeTarget?.textureId ?: 0)
         compositeMesh?.draw()
@@ -434,10 +475,34 @@ internal class RenderLoop(
             #version 300 es
             precision mediump float;
             uniform sampler2D uTexture;
+            uniform vec3 uDistortion;
+            uniform vec2 uLensCenter;
+            uniform vec2 uChromaticAberration;
             in vec2 vTextureCoordinate;
             out vec4 fragmentColor;
+            vec2 distortedCoordinate(vec2 coordinate, float channelOffset) {
+                vec2 centered = coordinate - uLensCenter;
+                float radiusSquared = dot(centered, centered);
+                float scale = 1.0 +
+                    uDistortion.x * radiusSquared +
+                    uDistortion.y * radiusSquared * radiusSquared +
+                    uDistortion.z * radiusSquared * radiusSquared * radiusSquared +
+                    channelOffset;
+                return uLensCenter + centered * scale;
+            }
             void main() {
-                fragmentColor = texture(uTexture, vTextureCoordinate);
+                vec2 redCoordinate = distortedCoordinate(vTextureCoordinate, uChromaticAberration.x);
+                vec2 greenCoordinate = distortedCoordinate(vTextureCoordinate, 0.0);
+                vec2 blueCoordinate = distortedCoordinate(vTextureCoordinate, uChromaticAberration.y);
+                if (greenCoordinate.x < 0.0 || greenCoordinate.x > 1.0 ||
+                    greenCoordinate.y < 0.0 || greenCoordinate.y > 1.0) {
+                    fragmentColor = vec4(0.0, 0.0, 0.0, 1.0);
+                    return;
+                }
+                float red = texture(uTexture, redCoordinate).r;
+                float green = texture(uTexture, greenCoordinate).g;
+                float blue = texture(uTexture, blueCoordinate).b;
+                fragmentColor = vec4(red, green, blue, 1.0);
             }
         """.trimIndent()
     }

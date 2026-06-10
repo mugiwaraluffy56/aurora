@@ -60,6 +60,10 @@ class RenderEngine {
         post { setStereoConfig(config) }
     }
 
+    fun setHeadsetProfile(profile: HeadsetProfile) {
+        post { setHeadsetProfile(profile) }
+    }
+
     fun recenter() {
         post { recenter() }
     }
