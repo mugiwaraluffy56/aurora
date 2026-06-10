@@ -9,6 +9,8 @@ data class PlaybackState(
     val durationMs: Long = 0L,
     val positionMs: Long = 0L,
     val bufferedPositionMs: Long = 0L,
+    val videoWidth: Int = 0,
+    val videoHeight: Int = 0,
     val error: PlaybackError? = null,
     val timedTextTracks: List<TimedTextTrack> = emptyList(),
 )

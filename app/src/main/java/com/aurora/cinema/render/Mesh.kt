@@ -31,11 +31,20 @@ internal class Mesh(
         GLES30.glEnableVertexAttribArray(0)
         GLES30.glVertexAttribPointer(
             0,
-            COMPONENTS_PER_VERTEX,
+            POSITION_COMPONENTS,
             GLES30.GL_FLOAT,
             false,
             COMPONENTS_PER_VERTEX * Float.SIZE_BYTES,
             0,
+        )
+        GLES30.glEnableVertexAttribArray(1)
+        GLES30.glVertexAttribPointer(
+            1,
+            TEXTURE_COMPONENTS,
+            GLES30.GL_FLOAT,
+            false,
+            COMPONENTS_PER_VERTEX * Float.SIZE_BYTES,
+            POSITION_COMPONENTS * Float.SIZE_BYTES,
         )
         GLES30.glBindVertexArray(0)
     }
@@ -52,17 +61,19 @@ internal class Mesh(
     }
 
     companion object {
-        private const val COMPONENTS_PER_VERTEX = 3
+        private const val POSITION_COMPONENTS = 3
+        private const val TEXTURE_COMPONENTS = 2
+        private const val COMPONENTS_PER_VERTEX = POSITION_COMPONENTS + TEXTURE_COMPONENTS
 
-        fun diagnosticScreen(): Mesh {
+        fun screenQuad(): Mesh {
             return Mesh(
                 floatArrayOf(
-                    -0.82f, -0.46f, 0f,
-                    0.82f, -0.46f, 0f,
-                    0.82f, 0.46f, 0f,
-                    -0.82f, -0.46f, 0f,
-                    0.82f, 0.46f, 0f,
-                    -0.82f, 0.46f, 0f,
+                    -1f, -1f, 0f, 0f, 0f,
+                    1f, -1f, 0f, 1f, 0f,
+                    1f, 1f, 0f, 1f, 1f,
+                    -1f, -1f, 0f, 0f, 0f,
+                    1f, 1f, 0f, 1f, 1f,
+                    -1f, 1f, 0f, 0f, 1f,
                 ),
             )
         }

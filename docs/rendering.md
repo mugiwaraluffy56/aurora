@@ -14,9 +14,15 @@ This requires more lifecycle code, but it gives Aurora explicit control over the
 
 ## Current Pipeline
 
-Phase 5 clears to opaque black and can optionally draw a diagnostic screen mesh. The mesh confirms that EGL context creation, shader compilation, vertex upload, frame scheduling, and buffer swaps work.
+The renderer clears to opaque black and can optionally draw a diagnostic overlay. The overlay confirms that EGL context creation, shader compilation, vertex upload, frame scheduling, and buffer swaps work.
 
-The render loop is deliberately independent from Media3. Phase 6 will provide decoded video frames through an external texture without moving playback ownership onto the GL thread.
+## Video Texture Pipeline
+
+`VideoFrameSampler` creates a `GL_TEXTURE_EXTERNAL_OES`, `SurfaceTexture`, and Android `Surface` on the render thread. `RenderEngine.videoSurface` publishes the surface to the UI, which attaches it to Media3 on the main thread. Media3 retains player ownership; the renderer retains texture and surface ownership.
+
+Frame callbacks run on the render thread and only set an atomic pending flag. The display-synchronized render loop calls `updateTexImage()` when a new frame is available, applies the `SurfaceTexture` transform matrix, and samples the external texture. Player operations never block the render thread.
+
+`ScreenGeometry.aspectFit` preserves the decoded video aspect ratio with letterboxing or pillarboxing. Render overlays run after the video pass, providing the extension point for subtitles, gaze controls, and VR UI.
 
 ## Native Boundary
 

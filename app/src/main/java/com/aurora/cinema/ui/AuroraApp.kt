@@ -51,7 +51,6 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
-import androidx.media3.ui.PlayerView
 import com.aurora.cinema.app.AppContainer
 import com.aurora.cinema.core.nativebridge.NativeCore
 import com.aurora.cinema.library.ImportResult
@@ -333,30 +332,62 @@ private fun PlayerScreen(
     playbackState: PlaybackState,
     appContainer: AppContainer,
 ) {
+    val lifecycleOwner = LocalLifecycleOwner.current
+    val renderEngine = remember { RenderEngine() }
+    val renderTelemetry by renderEngine.telemetry.collectAsStateWithLifecycle()
+    val videoSurface by renderEngine.videoSurface.collectAsStateWithLifecycle()
+
+    LaunchedEffect(videoSurface, appContainer.playerController) {
+        appContainer.playerController.setVideoSurface(videoSurface)
+    }
+
+    LaunchedEffect(playbackState.videoWidth, playbackState.videoHeight) {
+        renderEngine.setVideoSize(playbackState.videoWidth, playbackState.videoHeight)
+    }
+
+    DisposableEffect(lifecycleOwner, renderEngine) {
+        val observer = LifecycleEventObserver { _, event ->
+            when (event) {
+                Lifecycle.Event.ON_RESUME -> renderEngine.resume()
+                Lifecycle.Event.ON_PAUSE -> renderEngine.pause()
+                else -> Unit
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        if (lifecycleOwner.lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED)) {
+            renderEngine.resume()
+        }
+        onDispose {
+            lifecycleOwner.lifecycle.removeObserver(observer)
+            appContainer.playerController.setVideoSurface(null)
+            renderEngine.release()
+        }
+    }
+
     ScreenColumn {
         ScreenHeader(
             title = "Player",
-            subtitle = "Normal phone playback for the selected offline video.",
+            subtitle = "OpenGL-rendered playback for the selected offline video.",
         )
-        if (playbackState.selectedVideo != null) {
-            AndroidView(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .aspectRatio(16 / 9f),
-                factory = { context ->
-                    PlayerView(context).apply {
-                        player = appContainer.playerController.mediaPlayer
-                        useController = true
-                    }
-                },
-                update = { playerView ->
-                    playerView.player = appContainer.playerController.mediaPlayer
-                },
-            )
-            Spacer(modifier = Modifier.height(16.dp))
-        }
+        AndroidView(
+            modifier = Modifier
+                .fillMaxWidth()
+                .aspectRatio(16 / 9f),
+            factory = { context ->
+                AuroraRenderView(context, renderEngine = renderEngine)
+            },
+        )
+        Spacer(modifier = Modifier.height(16.dp))
         StatusRow(label = "Selected video", value = playbackState.selectedVideo?.displayName ?: selectedVideo?.displayName ?: "No video selected")
         StatusRow(label = "Position", value = "${playbackState.positionMs.timeLabel()} / ${playbackState.durationMs.timeLabel()}")
+        StatusRow(
+            label = "Video surface",
+            value = if (renderTelemetry.videoSurfaceAttached) "Connected" else "Waiting",
+        )
+        StatusRow(
+            label = "Video frames",
+            value = "${renderTelemetry.videoFramesPresented} presented / ${renderTelemetry.videoFramesAvailable} available",
+        )
         if (playbackState.error != null) {
             Text(
                 text = playbackState.error.message,
@@ -938,6 +969,8 @@ private fun AuroraAppPreview() {
                     override fun stop() = Unit
 
                     override fun saveProgress() = Unit
+
+                    override fun setVideoSurface(surface: android.view.Surface?) = Unit
                 }
                 override val mediaSessionController: com.aurora.cinema.playback.MediaSessionController
                     get() = error("Preview does not create a media session")

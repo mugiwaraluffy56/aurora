@@ -11,6 +11,9 @@ data class RenderTelemetry(
     val glVendor: String = "",
     val glRenderer: String = "",
     val glVersion: String = "",
+    val videoFramesAvailable: Long = 0L,
+    val videoFramesPresented: Long = 0L,
+    val videoSurfaceAttached: Boolean = false,
     val lastError: String? = null,
 )
 

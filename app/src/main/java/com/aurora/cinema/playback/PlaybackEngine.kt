@@ -3,9 +3,11 @@ package com.aurora.cinema.playback
 import android.content.Context
 import android.content.Intent
 import android.net.Uri
+import android.view.Surface
 import androidx.media3.common.AudioAttributes
 import androidx.media3.common.MediaItem
 import androidx.media3.common.Player
+import androidx.media3.common.VideoSize
 import androidx.media3.exoplayer.ExoPlayer
 import com.aurora.cinema.library.VideoItem
 import kotlinx.coroutines.CoroutineScope
@@ -50,6 +52,18 @@ class PlaybackEngine(
                             message = error.localizedMessage ?: "Playback failed",
                             causeName = error.errorCodeName,
                         ),
+                    )
+                }
+
+                override fun onVideoSizeChanged(videoSize: VideoSize) {
+                    val displaySize = VideoDisplaySizeCalculator.calculate(
+                        width = videoSize.width,
+                        height = videoSize.height,
+                        pixelWidthHeightRatio = videoSize.pixelWidthHeightRatio,
+                    )
+                    mutableState.value = mutableState.value.copy(
+                        videoWidth = displaySize.width,
+                        videoHeight = displaySize.height,
                     )
                 }
             },
@@ -122,6 +136,10 @@ class PlaybackEngine(
         scope.launch {
             progressStore.savePosition(video.id, position, duration)
         }
+    }
+
+    override fun setVideoSurface(surface: Surface?) {
+        player.setVideoSurface(surface)
     }
 
     private fun syncState() {

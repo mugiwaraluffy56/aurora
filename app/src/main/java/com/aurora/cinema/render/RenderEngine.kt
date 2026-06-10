@@ -13,12 +13,16 @@ class RenderEngine {
     private val mutableTelemetry = MutableStateFlow(
         RenderTelemetry(state = RenderState.WaitingForSurface),
     )
-    private val renderLoop = RenderLoop { telemetry ->
-        mutableTelemetry.value = telemetry
-    }
+    private val mutableVideoSurface = MutableStateFlow<Surface?>(null)
+    private val renderLoop = RenderLoop(
+        callbackHandler = handler,
+        onTelemetry = { telemetry -> mutableTelemetry.value = telemetry },
+        onVideoSurface = { surface -> mutableVideoSurface.value = surface },
+    )
     private var released = false
 
     val telemetry: StateFlow<RenderTelemetry> = mutableTelemetry.asStateFlow()
+    val videoSurface: StateFlow<Surface?> = mutableVideoSurface.asStateFlow()
 
     fun attachSurface(surface: Surface, width: Int, height: Int) {
         post { setSurface(surface, width, height) }
@@ -42,6 +46,10 @@ class RenderEngine {
 
     fun setDiagnosticMeshEnabled(enabled: Boolean) {
         post { setDiagnosticMeshEnabled(enabled) }
+    }
+
+    fun setVideoSize(width: Int, height: Int) {
+        post { setVideoSize(width, height) }
     }
 
     fun release() {

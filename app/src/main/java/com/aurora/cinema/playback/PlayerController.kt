@@ -1,5 +1,6 @@
 package com.aurora.cinema.playback
 
+import android.view.Surface
 import com.aurora.cinema.library.VideoItem
 import androidx.media3.common.Player
 import kotlinx.coroutines.flow.StateFlow
@@ -19,4 +20,6 @@ interface PlayerController {
     fun stop()
 
     fun saveProgress()
+
+    fun setVideoSurface(surface: Surface?)
 }
