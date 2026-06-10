@@ -97,6 +97,7 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.BlurredEdgeTreatment
 import androidx.compose.ui.draw.blur
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
@@ -396,10 +397,10 @@ private fun GlassNavigationBar(
         modifier = Modifier
             .fillMaxWidth()
             .padding(horizontal = 20.dp, vertical = 14.dp)
-            .heightIn(min = 92.dp),
+            .height(92.dp),
         color = Color.White.copy(alpha = 0.12f),
         contentColor = MaterialTheme.colorScheme.onSurface,
-        shape = RoundedCornerShape(56.dp),
+        shape = RoundedCornerShape(46.dp),
         border = BorderStroke(1.dp, Color.White.copy(alpha = 0.22f)),
         shadowElevation = 18.dp,
     ) {
@@ -410,6 +411,7 @@ private fun GlassNavigationBar(
         ) {
             primaryScreens.forEach { screen ->
                 val selected = selectedScreen == screen
+                val interactionSource = remember(screen) { MutableInteractionSource() }
                 val itemColor by animateColorAsState(
                     targetValue = if (selected) {
                         Color.White.copy(alpha = 0.18f)
@@ -420,7 +422,7 @@ private fun GlassNavigationBar(
                     label = "nav-item-color",
                 )
                 val itemScale by animateFloatAsState(
-                    targetValue = if (selected) 1.02f else 0.96f,
+                    targetValue = if (selected) 1f else 0.985f,
                     animationSpec = tween(durationMillis = 260),
                     label = "nav-item-scale",
                 )
@@ -432,14 +434,19 @@ private fun GlassNavigationBar(
                 Surface(
                     modifier = Modifier
                         .weight(1f)
-                        .heightIn(min = 72.dp)
+                        .height(72.dp)
                         .graphicsLayer {
                             scaleX = itemScale
                             scaleY = itemScale
                         }
-                        .clickable {
-                            haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                            onSelect(screen)
+                        .clickable(
+                            interactionSource = interactionSource,
+                            indication = null,
+                        ) {
+                            if (selectedScreen != screen) {
+                                haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                onSelect(screen)
+                            }
                         },
                     color = itemColor,
                     contentColor = if (selected) {
@@ -447,7 +454,7 @@ private fun GlassNavigationBar(
                     } else {
                         MaterialTheme.colorScheme.onSurfaceVariant
                     },
-                    shape = RoundedCornerShape(44.dp),
+                    shape = RoundedCornerShape(36.dp),
                     shadowElevation = itemElevation,
                 ) {
                     Column(
@@ -476,29 +483,48 @@ private fun GlassNavigationBar(
 
 @Composable
 private fun BoxScope.LiquidBackdrop() {
-    Box(
+    LiquidGlow(
         modifier = Modifier
-            .size(360.dp)
             .align(Alignment.TopEnd)
-            .offset(x = 120.dp, y = 40.dp)
-            .blur(90.dp)
-            .background(Color.White.copy(alpha = 0.07f), CircleShape),
+            .offset(x = 120.dp, y = 40.dp),
+        size = 420,
+        alpha = 0.10f,
     )
-    Box(
+    LiquidGlow(
         modifier = Modifier
-            .size(280.dp)
             .align(Alignment.CenterStart)
-            .offset(x = (-120).dp, y = 80.dp)
-            .blur(100.dp)
-            .background(Color.White.copy(alpha = 0.08f), CircleShape),
+            .offset(x = (-140).dp, y = 80.dp),
+        size = 360,
+        alpha = 0.11f,
     )
-    Box(
+    LiquidGlow(
         modifier = Modifier
-            .size(240.dp)
             .align(Alignment.BottomEnd)
-            .offset(x = 80.dp, y = (-40).dp)
-            .blur(80.dp)
-            .background(Color.White.copy(alpha = 0.05f), CircleShape),
+            .offset(x = 96.dp, y = (-48).dp),
+        size = 320,
+        alpha = 0.08f,
+    )
+}
+
+@Composable
+private fun LiquidGlow(
+    modifier: Modifier = Modifier,
+    size: Int,
+    alpha: Float,
+) {
+    Box(
+        modifier = modifier
+            .size(size.dp)
+            .background(
+                Brush.radialGradient(
+                    colors = listOf(
+                        Color.White.copy(alpha = alpha),
+                        Color.White.copy(alpha = alpha * 0.34f),
+                        Color.Transparent,
+                    ),
+                ),
+                CircleShape,
+            ),
     )
 }
 
@@ -549,20 +575,20 @@ private fun GlassIconBadge(
         label = "glass-badge-pulse-alpha",
     )
     Box(
-        modifier = Modifier.size((size + 18).dp),
+        modifier = Modifier.size((size + 48).dp),
         contentAlignment = Alignment.Center,
     ) {
         if (pulsing) {
             Box(
                 modifier = Modifier
-                    .size(size.dp)
+                    .size((size + 16).dp)
                     .graphicsLayer {
                         scaleX = pulseScale
                         scaleY = pulseScale
                         alpha = pulseAlpha
                     }
-                    .blur(18.dp)
-                    .background(Color.White, RoundedCornerShape((size / 3).dp)),
+                    .background(Color.White, RoundedCornerShape(((size + 16) / 3).dp))
+                    .blur(18.dp, edgeTreatment = BlurredEdgeTreatment.Unbounded),
             )
         }
         Surface(
