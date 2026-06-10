@@ -58,6 +58,7 @@ import com.aurora.cinema.library.LibrarySort
 import com.aurora.cinema.library.OfflineLibraryRepository
 import com.aurora.cinema.library.VideoAccessState
 import com.aurora.cinema.library.VideoItem
+import com.aurora.cinema.media.CodecSupportStatus
 import com.aurora.cinema.playback.PlaybackState
 import com.aurora.cinema.settings.AppSettings
 import com.aurora.cinema.settings.AppSettingsRepository
@@ -183,7 +184,7 @@ private fun AuroraShell(
                     repository = appContainer.settingsRepository,
                 )
                 AppScreen.Calibration -> CalibrationScreen()
-                AppScreen.About -> AboutScreen(packageName = appContainer.applicationContext.packageName)
+                AppScreen.About -> AboutScreen(appContainer = appContainer)
             }
         }
     }
@@ -424,12 +425,36 @@ private fun VideoDetailsScreen(
             StatusRow(label = "Duration", value = video.durationLabel())
             StatusRow(label = "Resolution", value = video.resolutionLabel())
             StatusRow(label = "Mime type", value = video.mimeType.ifBlank { "Unknown" })
+            StatusRow(label = "Video codec", value = video.probeResult.codecFamily)
+            StatusRow(label = "Profile / level", value = video.probeResult.profileLevel)
+            StatusRow(label = "Decoder", value = video.probeResult.decoderName.ifBlank { "Not found" })
+            StatusRow(label = "Codec status", value = video.probeResult.supportStatus.label())
+            StatusRow(label = "Frame rate", value = video.probeResult.frameRate.frameRateLabel())
+            StatusRow(label = "Bitrate", value = video.probeResult.bitrate.bitrateLabel())
+            StatusRow(label = "Bit depth", value = video.probeResult.bitDepth.bitDepthLabel())
+            StatusRow(label = "HDR", value = video.probeResult.hdrFormat)
             StatusRow(label = "Source", value = video.sourceType)
             StatusRow(label = "Access", value = video.accessLabel())
             StatusRow(
                 label = "Playback",
                 value = if (playbackState.selectedVideo?.id == video.id) "Loaded" else "Not loaded",
             )
+            if (video.probeResult.warnings.isNotEmpty()) {
+                Spacer(modifier = Modifier.height(8.dp))
+                Text(
+                    text = "Warnings",
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.SemiBold,
+                    color = MaterialTheme.colorScheme.error,
+                )
+                Spacer(modifier = Modifier.height(4.dp))
+                Text(
+                    text = video.probeResult.warnings.joinToString(separator = "\n"),
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.error,
+                )
+                Spacer(modifier = Modifier.height(12.dp))
+            }
             Spacer(modifier = Modifier.height(12.dp))
             Button(
                 enabled = video.accessState == VideoAccessState.Available,
@@ -495,15 +520,40 @@ private fun CalibrationScreen() {
 }
 
 @Composable
-private fun AboutScreen(packageName: String) {
+private fun AboutScreen(appContainer: AppContainer) {
+    val displayInfo = appContainer.deviceDisplayInfo.read()
+    val codecs = appContainer.codecCapabilityService.summarizeDeviceCodecs()
+
     ScreenColumn {
         ScreenHeader(
             title = "About / Diagnostics",
             subtitle = "App and runtime diagnostics for the Aurora cinema engine.",
         )
-        StatusRow(label = "Package", value = packageName)
+        StatusRow(label = "Package", value = appContainer.applicationContext.packageName)
         StatusRow(label = "Native core", value = NativeCore.engineName())
         StatusRow(label = "App shell", value = "Ready")
+        StatusRow(label = "Device", value = displayInfo.deviceName)
+        StatusRow(label = "Android", value = displayInfo.androidVersion)
+        StatusRow(
+            label = "Display",
+            value = "${displayInfo.widthPixels}x${displayInfo.heightPixels} @ ${displayInfo.densityDpi} dpi",
+        )
+        if (displayInfo.refreshRate > 0f) {
+            StatusRow(label = "Refresh", value = "${displayInfo.refreshRate.toInt()} Hz")
+        }
+        Spacer(modifier = Modifier.height(12.dp))
+        Text(
+            text = "Video decoders",
+            style = MaterialTheme.typography.titleLarge,
+            fontWeight = FontWeight.SemiBold,
+        )
+        Spacer(modifier = Modifier.height(12.dp))
+        codecs.forEach { codec ->
+            StatusRow(
+                label = codec.codecFamily,
+                value = if (codec.supported) codec.decoderName else "Not found",
+            )
+        }
     }
 }
 
@@ -716,6 +766,35 @@ private fun VideoItem.accessLabel(): String {
     }
 }
 
+private fun CodecSupportStatus.label(): String {
+    return when (this) {
+        CodecSupportStatus.Supported -> "Supported"
+        CodecSupportStatus.Risky -> "Risky"
+        CodecSupportStatus.Unsupported -> "Unsupported"
+        CodecSupportStatus.Unknown -> "Unknown"
+    }
+}
+
+private fun Float.frameRateLabel(): String {
+    return if (this > 0f) {
+        "%.2f fps".format(this)
+    } else {
+        "Unknown"
+    }
+}
+
+private fun Long.bitrateLabel(): String {
+    return if (this > 0L) {
+        "%.1f Mbps".format(this / 1_000_000f)
+    } else {
+        "Unknown"
+    }
+}
+
+private fun Int.bitDepthLabel(): String {
+    return if (this > 0) "$this-bit" else "Unknown"
+}
+
 private fun Long.timeLabel(): String {
     if (this <= 0L) return "0:00"
     val totalSeconds = this / 1000L
@@ -770,6 +849,8 @@ private fun AuroraAppPreview() {
                 }
                 override val mediaSessionController: com.aurora.cinema.playback.MediaSessionController
                     get() = error("Preview does not create a media session")
+                override val codecCapabilityService = com.aurora.cinema.media.CodecCapabilityService()
+                override val deviceDisplayInfo = com.aurora.cinema.media.DeviceDisplayInfo(applicationContext)
                 override val settingsRepository = object : AppSettingsRepository {
                     override val settings: Flow<AppSettings> = MutableStateFlow(
                         AppSettings(firstRunAcknowledged = true),

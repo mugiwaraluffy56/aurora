@@ -1,5 +1,7 @@
 package com.aurora.cinema.library
 
+import com.aurora.cinema.media.MediaProbeResult
+
 data class VideoMetadata(
     val uri: String,
     val displayName: String,
@@ -10,4 +12,5 @@ data class VideoMetadata(
     val sourceType: String,
     val persistedPermission: Boolean,
     val accessState: VideoAccessState,
+    val probeResult: MediaProbeResult,
 )

@@ -1,5 +1,7 @@
 package com.aurora.cinema.library
 
+import com.aurora.cinema.media.MediaProbeResult
+
 data class VideoItem(
     val id: Long,
     val uri: String,
@@ -14,6 +16,7 @@ data class VideoItem(
     val persistedPermission: Boolean,
     val lastAccessCheckAt: Long,
     val accessState: VideoAccessState,
+    val probeResult: MediaProbeResult,
 )
 
 enum class VideoAccessState {

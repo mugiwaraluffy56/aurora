@@ -6,9 +6,11 @@ import android.media.MediaMetadataRetriever
 import android.net.Uri
 import android.provider.OpenableColumns
 import androidx.documentfile.provider.DocumentFile
+import com.aurora.cinema.media.MediaProbe
 
 class AndroidVideoMetadataReader(
     private val contentResolver: ContentResolver,
+    private val mediaProbe: MediaProbe,
 ) {
     fun read(
         uri: Uri,
@@ -21,16 +23,18 @@ class AndroidVideoMetadataReader(
         val accessState = if (canOpen(uri)) VideoAccessState.Available else VideoAccessState.Missing
 
         val mediaMetadata = readMediaMetadata(uri)
+        val finalMimeType = mimeType.ifBlank { guessMimeType(displayName) }
         return VideoMetadata(
             uri = uri.toString(),
             displayName = displayName,
             durationMs = mediaMetadata.durationMs,
             width = mediaMetadata.width,
             height = mediaMetadata.height,
-            mimeType = mimeType.ifBlank { guessMimeType(displayName) },
+            mimeType = finalMimeType,
             sourceType = sourceType,
             persistedPermission = persistedPermission,
             accessState = accessState,
+            probeResult = mediaProbe.probe(uri, finalMimeType),
         )
     }
 

@@ -6,6 +6,8 @@ import android.net.Uri
 import androidx.documentfile.provider.DocumentFile
 import com.aurora.cinema.library.db.VideoDao
 import com.aurora.cinema.library.db.VideoEntity
+import com.aurora.cinema.media.CodecSupportStatus
+import com.aurora.cinema.media.MediaProbeResult
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
@@ -125,6 +127,17 @@ class RoomOfflineLibraryRepository(
             persistedPermission = persistedPermission,
             lastAccessCheckAt = now,
             accessState = accessState.name,
+            probeContainerMimeType = probeResult.containerMimeType,
+            probeVideoMimeType = probeResult.videoMimeType,
+            codecFamily = probeResult.codecFamily,
+            profileLevel = probeResult.profileLevel,
+            frameRate = probeResult.frameRate,
+            bitrate = probeResult.bitrate,
+            bitDepth = probeResult.bitDepth,
+            hdrFormat = probeResult.hdrFormat,
+            decoderName = probeResult.decoderName,
+            codecSupportStatus = probeResult.supportStatus.name,
+            codecWarnings = probeResult.warningText,
         )
     }
 
@@ -144,6 +157,22 @@ class RoomOfflineLibraryRepository(
             lastAccessCheckAt = lastAccessCheckAt,
             accessState = runCatching { VideoAccessState.valueOf(accessState) }
                 .getOrDefault(VideoAccessState.Unknown),
+            probeResult = MediaProbeResult(
+                containerMimeType = probeContainerMimeType,
+                videoMimeType = probeVideoMimeType,
+                codecFamily = codecFamily,
+                profileLevel = profileLevel,
+                width = width,
+                height = height,
+                frameRate = frameRate,
+                bitrate = bitrate,
+                bitDepth = bitDepth,
+                hdrFormat = hdrFormat,
+                decoderName = decoderName,
+                supportStatus = runCatching { CodecSupportStatus.valueOf(codecSupportStatus) }
+                    .getOrDefault(CodecSupportStatus.Unknown),
+                warnings = codecWarnings.lines().filter { it.isNotBlank() },
+            ),
         )
     }
 }
