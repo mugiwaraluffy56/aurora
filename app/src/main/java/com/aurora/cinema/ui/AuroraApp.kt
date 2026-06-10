@@ -1,5 +1,8 @@
 package com.aurora.cinema.ui
 
+import android.net.Uri
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
@@ -13,11 +16,14 @@ import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
+import androidx.compose.material3.FilterChip
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
+import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Slider
 import androidx.compose.material3.Surface
@@ -26,6 +32,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.rememberCoroutineScope
@@ -39,6 +46,11 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.aurora.cinema.app.AppContainer
 import com.aurora.cinema.core.nativebridge.NativeCore
+import com.aurora.cinema.library.ImportResult
+import com.aurora.cinema.library.LibrarySort
+import com.aurora.cinema.library.OfflineLibraryRepository
+import com.aurora.cinema.library.VideoAccessState
+import com.aurora.cinema.library.VideoItem
 import com.aurora.cinema.settings.AppSettings
 import com.aurora.cinema.settings.AppSettingsRepository
 import com.aurora.cinema.ui.theme.AuroraTheme
@@ -77,6 +89,13 @@ private fun AuroraShell(
     settings: AppSettings,
 ) {
     var selectedScreen by rememberSaveable { mutableStateOf(AppScreen.Library) }
+    var selectedVideoId by rememberSaveable { mutableStateOf<Long?>(null) }
+    val videos by appContainer.libraryRepository.videos.collectAsStateWithLifecycle(initialValue = emptyList())
+    val scope = rememberCoroutineScope()
+
+    LaunchedEffect(Unit) {
+        appContainer.libraryRepository.refreshAccessChecks()
+    }
 
     Scaffold(
         topBar = {
@@ -108,9 +127,27 @@ private fun AuroraShell(
             color = MaterialTheme.colorScheme.background,
         ) {
             when (selectedScreen) {
-                AppScreen.Library -> LibraryScreen(onOpenDetails = { selectedScreen = AppScreen.VideoDetails })
-                AppScreen.Player -> PlayerScreen()
-                AppScreen.VideoDetails -> VideoDetailsScreen()
+                AppScreen.Library -> LibraryScreen(
+                    videos = videos,
+                    repository = appContainer.libraryRepository,
+                    onOpenDetails = { videoId ->
+                        selectedVideoId = videoId
+                        selectedScreen = AppScreen.VideoDetails
+                    },
+                )
+                AppScreen.Player -> PlayerScreen(
+                    selectedVideo = videos.firstOrNull { it.id == selectedVideoId },
+                )
+                AppScreen.VideoDetails -> VideoDetailsScreen(
+                    video = videos.firstOrNull { it.id == selectedVideoId },
+                    onDelete = { videoId ->
+                        selectedVideoId = null
+                        selectedScreen = AppScreen.Library
+                        scope.launch {
+                            appContainer.libraryRepository.deleteLibraryEntry(videoId)
+                        }
+                    },
+                )
                 AppScreen.Settings -> SettingsScreen(
                     settings = settings,
                     repository = appContainer.settingsRepository,
@@ -149,43 +186,152 @@ private fun SafetyAcknowledgementScreen(onContinue: () -> Unit) {
 }
 
 @Composable
-private fun LibraryScreen(onOpenDetails: () -> Unit) {
+private fun LibraryScreen(
+    videos: List<VideoItem>,
+    repository: OfflineLibraryRepository,
+    onOpenDetails: (Long) -> Unit,
+) {
+    val scope = rememberCoroutineScope()
+    var query by rememberSaveable { mutableStateOf("") }
+    var sort by rememberSaveable { mutableStateOf(LibrarySort.Recent) }
+    var importMessage by rememberSaveable { mutableStateOf<String?>(null) }
+    val filePicker = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.OpenDocument(),
+    ) { uri: Uri? ->
+        if (uri != null) {
+            scope.launch {
+                importMessage = repository.importVideo(uri).toMessage()
+            }
+        }
+    }
+    val folderPicker = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.OpenDocumentTree(),
+    ) { uri: Uri? ->
+        if (uri != null) {
+            scope.launch {
+                importMessage = repository.importFolder(uri).toMessage()
+            }
+        }
+    }
+    val filteredVideos = videos
+        .filter { video -> video.displayName.contains(query, ignoreCase = true) }
+        .sortedWith(
+            when (sort) {
+                LibrarySort.Recent -> compareByDescending<VideoItem> { it.lastSeenAt }
+                LibrarySort.Title -> compareBy { it.displayName.lowercase() }
+                LibrarySort.Duration -> compareByDescending { it.durationMs }
+            },
+        )
+
     ScreenColumn {
         ScreenHeader(
             title = "Library",
-            subtitle = "Your offline cinema library will appear here once local import is added.",
+            subtitle = "Import local videos from Android's file picker and keep them available for offline viewing.",
         )
-        ActionPanel(
-            title = "No videos yet",
-            body = "Video import will use Android's file and folder picker.",
-            actionLabel = "View details placeholder",
-            onAction = onOpenDetails,
+        Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+            Button(onClick = { filePicker.launch(videoMimeTypes) }) {
+                Text("Import video")
+            }
+            OutlinedButton(onClick = { folderPicker.launch(null) }) {
+                Text("Import folder")
+            }
+        }
+        if (importMessage != null) {
+            Spacer(modifier = Modifier.height(12.dp))
+            Text(
+                text = importMessage.orEmpty(),
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.72f),
+            )
+        }
+        Spacer(modifier = Modifier.height(20.dp))
+        OutlinedTextField(
+            value = query,
+            onValueChange = { query = it },
+            modifier = Modifier.fillMaxWidth(),
+            singleLine = true,
+            label = { Text("Search videos") },
         )
+        Spacer(modifier = Modifier.height(12.dp))
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            LibrarySort.entries.forEach { option ->
+                FilterChip(
+                    selected = sort == option,
+                    onClick = { sort = option },
+                    label = { Text(option.label) },
+                )
+            }
+        }
+        Spacer(modifier = Modifier.height(20.dp))
+        if (filteredVideos.isEmpty()) {
+            ActionPanel(
+                title = if (videos.isEmpty()) "No videos yet" else "No matching videos",
+                body = if (videos.isEmpty()) {
+                    "Import a video file or a folder of videos to build your offline cinema library."
+                } else {
+                    "Try a different search term."
+                },
+                actionLabel = "Refresh access",
+                onAction = {
+                    scope.launch {
+                        repository.refreshAccessChecks()
+                        importMessage = "Library access checked"
+                    }
+                },
+            )
+        } else {
+            filteredVideos.forEach { video ->
+                VideoListItem(
+                    video = video,
+                    onOpenDetails = { onOpenDetails(video.id) },
+                )
+                Spacer(modifier = Modifier.height(16.dp))
+            }
+        }
     }
 }
 
 @Composable
-private fun PlayerScreen() {
+private fun PlayerScreen(selectedVideo: VideoItem?) {
     ScreenColumn {
         ScreenHeader(
             title = "Player",
             subtitle = "Normal phone playback and VR entry controls will live here.",
         )
-        StatusRow(label = "Mode", value = "Phone playback placeholder")
+        StatusRow(label = "Selected video", value = selectedVideo?.displayName ?: "No video selected")
+        StatusRow(label = "Mode", value = "Phone playback pending")
         StatusRow(label = "VR entry", value = "Not connected yet")
     }
 }
 
 @Composable
-private fun VideoDetailsScreen() {
+private fun VideoDetailsScreen(
+    video: VideoItem?,
+    onDelete: (Long) -> Unit,
+) {
     ScreenColumn {
         ScreenHeader(
             title = "Video Details",
-            subtitle = "Selected video metadata, codec warnings, and resume state will appear here.",
+            subtitle = "Selected video metadata and library access state.",
         )
-        StatusRow(label = "Title", value = "No video selected")
-        StatusRow(label = "Aspect ratio", value = "Source")
-        StatusRow(label = "Playback position", value = "0:00")
+        if (video == null) {
+            Text(
+                text = "No video selected.",
+                style = MaterialTheme.typography.bodyLarge,
+                color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.72f),
+            )
+        } else {
+            StatusRow(label = "Title", value = video.displayName)
+            StatusRow(label = "Duration", value = video.durationLabel())
+            StatusRow(label = "Resolution", value = video.resolutionLabel())
+            StatusRow(label = "Mime type", value = video.mimeType.ifBlank { "Unknown" })
+            StatusRow(label = "Source", value = video.sourceType)
+            StatusRow(label = "Access", value = video.accessLabel())
+            Spacer(modifier = Modifier.height(12.dp))
+            OutlinedButton(onClick = { onDelete(video.id) }) {
+                Text("Remove from library")
+            }
+        }
     }
 }
 
@@ -312,6 +458,46 @@ private fun ActionPanel(
 }
 
 @Composable
+private fun VideoListItem(
+    video: VideoItem,
+    onOpenDetails: () -> Unit,
+) {
+    Column(modifier = Modifier.fillMaxWidth()) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = video.displayName,
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.SemiBold,
+                )
+                Text(
+                    text = "${video.durationLabel()} • ${video.resolutionLabel()} • ${video.accessLabel()}",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.66f),
+                )
+            }
+            OutlinedButton(onClick = onOpenDetails) {
+                Text("Details")
+            }
+        }
+        if (video.accessState == VideoAccessState.Missing) {
+            Spacer(modifier = Modifier.height(8.dp))
+            Text(
+                text = "Access is missing. Re-import this file or folder to reconnect it.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.error,
+            )
+        }
+        Spacer(modifier = Modifier.height(12.dp))
+        HorizontalDivider(color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.08f))
+    }
+}
+
+@Composable
 private fun SettingSwitchRow(
     label: String,
     body: String,
@@ -377,6 +563,49 @@ private enum class AppScreen(
     About("About / Diagnostics", "About", "A"),
 }
 
+private val videoMimeTypes = arrayOf(
+    "video/*",
+    "application/octet-stream",
+    "application/x-matroska",
+)
+
+private fun ImportResult.toMessage(): String {
+    return when {
+        importedCount > 0 && skippedCount > 0 -> "Imported $importedCount video(s), skipped $skippedCount item(s)"
+        importedCount > 0 -> "Imported $importedCount video(s)"
+        else -> "No videos imported"
+    }
+}
+
+private fun VideoItem.durationLabel(): String {
+    if (durationMs <= 0L) return "Unknown duration"
+    val totalSeconds = durationMs / 1000L
+    val hours = totalSeconds / 3600L
+    val minutes = (totalSeconds % 3600L) / 60L
+    val seconds = totalSeconds % 60L
+    return if (hours > 0) {
+        "%d:%02d:%02d".format(hours, minutes, seconds)
+    } else {
+        "%d:%02d".format(minutes, seconds)
+    }
+}
+
+private fun VideoItem.resolutionLabel(): String {
+    return if (width > 0 && height > 0) {
+        "${width}x$height"
+    } else {
+        "Unknown resolution"
+    }
+}
+
+private fun VideoItem.accessLabel(): String {
+    return when (accessState) {
+        VideoAccessState.Available -> if (persistedPermission) "Available offline" else "Available this session"
+        VideoAccessState.Missing -> "Reconnect needed"
+        VideoAccessState.Unknown -> "Not checked"
+    }
+}
+
 @Preview(showBackground = true)
 @Composable
 private fun AuroraAppPreview() {
@@ -384,6 +613,21 @@ private fun AuroraAppPreview() {
         AuroraApp(
             appContainer = object : AppContainer {
                 override val applicationContext = androidx.compose.ui.platform.LocalContext.current
+                override val libraryRepository: OfflineLibraryRepository = object : OfflineLibraryRepository {
+                    override val videos: Flow<List<VideoItem>> = MutableStateFlow(emptyList())
+
+                    override suspend fun importVideo(uri: Uri, sourceType: String): ImportResult {
+                        return ImportResult(importedCount = 0, skippedCount = 0)
+                    }
+
+                    override suspend fun importFolder(uri: Uri): ImportResult {
+                        return ImportResult(importedCount = 0, skippedCount = 0)
+                    }
+
+                    override suspend fun refreshAccessChecks() = Unit
+
+                    override suspend fun deleteLibraryEntry(videoId: Long) = Unit
+                }
                 override val settingsRepository = object : AppSettingsRepository {
                     override val settings: Flow<AppSettings> = MutableStateFlow(
                         AppSettings(firstRunAcknowledged = true),
