@@ -142,6 +142,7 @@ import com.aurora.cinema.render.ScreenAspectRatio
 import com.aurora.cinema.render.ScreenCropMode
 import com.aurora.cinema.render.StereoConfig
 import com.aurora.cinema.render.StereoRenderMode
+import com.aurora.cinema.render.StereoVideoLayout
 import com.aurora.cinema.session.AndroidSessionEnvironment
 import com.aurora.cinema.session.SessionComfortPolicy
 import com.aurora.cinema.session.SessionComfortState
@@ -1956,6 +1957,32 @@ private fun CalibrationScreen(
                 )
             }
         }
+        Spacer(modifier = Modifier.height(18.dp))
+        Text("Video layout", style = MaterialTheme.typography.titleMedium)
+        Spacer(modifier = Modifier.height(8.dp))
+        FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            StereoVideoLayout.entries.forEach { layout ->
+                FilterChip(
+                    selected = draft.videoLayout == layout,
+                    onClick = {
+                        draft = draft.copy(videoLayout = layout)
+                        scope.launch { repository.setStereoConfig(draft) }
+                    },
+                    label = { Text(layout.label) },
+                    colors = glassChipColors(),
+                )
+            }
+        }
+        Spacer(modifier = Modifier.height(8.dp))
+        SettingSwitchRow(
+            label = "Swap left and right eyes",
+            body = "Use when SBS or over-under content appears inside-out",
+            checked = draft.swapEyes,
+            onCheckedChange = { enabled ->
+                draft = draft.copy(swapEyes = enabled)
+                scope.launch { repository.setStereoConfig(draft) }
+            },
+        )
         Spacer(modifier = Modifier.height(24.dp))
         SectionLabel("LENS DISTORTION")
         CinemaConfigSlider(

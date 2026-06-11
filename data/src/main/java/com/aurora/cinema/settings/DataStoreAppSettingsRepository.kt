@@ -19,6 +19,7 @@ import com.aurora.cinema.render.ScreenAspectRatio
 import com.aurora.cinema.render.ScreenCropMode
 import com.aurora.cinema.render.StereoConfig
 import com.aurora.cinema.render.StereoRenderMode
+import com.aurora.cinema.render.StereoVideoLayout
 import java.io.IOException
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.catch
@@ -65,6 +66,9 @@ class DataStoreAppSettingsRepository(
                     fieldOfViewDegrees = preferences[Keys.stereoFov] ?: 90f,
                     renderMode = preferences[Keys.stereoRenderMode]
                         .enumValueOrDefault(StereoRenderMode.Direct),
+                    videoLayout = preferences[Keys.stereoVideoLayout]
+                        .enumValueOrDefault(StereoVideoLayout.Mono),
+                    swapEyes = preferences[Keys.stereoSwapEyes] ?: false,
                 ),
                 headsetProfile = HeadsetProfile(
                     id = preferences[Keys.headsetId] ?: "default",
@@ -132,6 +136,8 @@ class DataStoreAppSettingsRepository(
             preferences[Keys.stereoIpd] = config.ipdMeters.coerceIn(0.04f, 0.09f)
             preferences[Keys.stereoFov] = config.fieldOfViewDegrees.coerceIn(60f, 110f)
             preferences[Keys.stereoRenderMode] = config.renderMode.name
+            preferences[Keys.stereoVideoLayout] = config.videoLayout.name
+            preferences[Keys.stereoSwapEyes] = config.swapEyes
         }
     }
 
@@ -188,6 +194,8 @@ class DataStoreAppSettingsRepository(
         val stereoIpd = floatPreferencesKey("stereo_ipd")
         val stereoFov = floatPreferencesKey("stereo_fov")
         val stereoRenderMode = stringPreferencesKey("stereo_render_mode")
+        val stereoVideoLayout = stringPreferencesKey("stereo_video_layout")
+        val stereoSwapEyes = booleanPreferencesKey("stereo_swap_eyes")
         val headsetId = stringPreferencesKey("headset_id")
         val headsetName = stringPreferencesKey("headset_name")
         val headsetIpd = floatPreferencesKey("headset_ipd")

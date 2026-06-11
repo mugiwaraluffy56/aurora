@@ -41,6 +41,8 @@ internal class RenderLoop(
     private var projectionUniform = -1
     private var activeScaleUniform = -1
     private var sampleScaleUniform = -1
+    private var stereoUvOffsetUniform = -1
+    private var stereoUvScaleUniform = -1
     private var brightnessUniform = -1
     private var contrastUniform = -1
     private var compositeTextureUniform = -1
@@ -158,6 +160,8 @@ internal class RenderLoop(
                 projectionUniform = GLES30.glGetUniformLocation(shaderId, "uProjection")
                 activeScaleUniform = GLES30.glGetUniformLocation(shaderId, "uActiveScale")
                 sampleScaleUniform = GLES30.glGetUniformLocation(shaderId, "uSampleScale")
+                stereoUvOffsetUniform = GLES30.glGetUniformLocation(shaderId, "uStereoUvOffset")
+                stereoUvScaleUniform = GLES30.glGetUniformLocation(shaderId, "uStereoUvScale")
                 brightnessUniform = GLES30.glGetUniformLocation(shaderId, "uBrightness")
                 contrastUniform = GLES30.glGetUniformLocation(shaderId, "uContrast")
                 compositeShader = ShaderProgram(COMPOSITE_VERTEX_SHADER, COMPOSITE_FRAGMENT_SHADER)
@@ -257,6 +261,8 @@ internal class RenderLoop(
         projectionUniform = -1
         activeScaleUniform = -1
         sampleScaleUniform = -1
+        stereoUvOffsetUniform = -1
+        stereoUvScaleUniform = -1
         brightnessUniform = -1
         contrastUniform = -1
         compositeTextureUniform = -1
@@ -310,18 +316,18 @@ internal class RenderLoop(
             ensureEyeTargets(eyeWidth, height)
             checkNotNull(leftEyeTarget).bind()
             GLES30.glClear(GLES30.GL_COLOR_BUFFER_BIT or GLES30.GL_DEPTH_BUFFER_BIT)
-            renderScene(shader, sampler, leftEyeMatrix)
+            renderScene(shader, sampler, leftEyeMatrix, rightEye = false)
             checkNotNull(rightEyeTarget).bind()
             GLES30.glClear(GLES30.GL_COLOR_BUFFER_BIT or GLES30.GL_DEPTH_BUFFER_BIT)
-            renderScene(shader, sampler, rightEyeMatrix)
+            renderScene(shader, sampler, rightEyeMatrix, rightEye = true)
             compositeEyes(eyeWidth)
         } else {
             GLES30.glBindFramebuffer(GLES30.GL_FRAMEBUFFER, 0)
             GLES30.glViewport(0, 0, eyeWidth, height)
             GLES30.glClear(GLES30.GL_COLOR_BUFFER_BIT)
-            renderScene(shader, sampler, leftEyeMatrix)
+            renderScene(shader, sampler, leftEyeMatrix, rightEye = false)
             GLES30.glViewport(eyeWidth, 0, width - eyeWidth, height)
-            renderScene(shader, sampler, rightEyeMatrix)
+            renderScene(shader, sampler, rightEyeMatrix, rightEye = true)
         }
     }
 
@@ -329,8 +335,14 @@ internal class RenderLoop(
         shader: ShaderProgram,
         sampler: VideoFrameSampler?,
         viewProjection: FloatArray,
+        rightEye: Boolean = false,
     ) {
         if (sampler != null && sampler.presentedFrames > 0) {
+            val uvRect = StereoVideoUvMapper.rect(
+                layout = stereoConfig.videoLayout,
+                rightEye = rightEye,
+                swapEyes = stereoConfig.swapEyes,
+            )
             shader.use()
             GLES30.glActiveTexture(GLES30.GL_TEXTURE0)
             GLES30.glBindTexture(android.opengl.GLES11Ext.GL_TEXTURE_EXTERNAL_OES, sampler.textureId)
@@ -339,6 +351,8 @@ internal class RenderLoop(
             GLES30.glUniformMatrix4fv(projectionUniform, 1, false, viewProjection, 0)
             GLES30.glUniform2f(activeScaleUniform, contentMapping.activeScaleX, contentMapping.activeScaleY)
             GLES30.glUniform2f(sampleScaleUniform, contentMapping.sampleScaleX, contentMapping.sampleScaleY)
+            GLES30.glUniform2f(stereoUvOffsetUniform, uvRect.offsetX, uvRect.offsetY)
+            GLES30.glUniform2f(stereoUvScaleUniform, uvRect.scaleX, uvRect.scaleY)
             GLES30.glUniform1f(brightnessUniform, screenConfig.brightness)
             GLES30.glUniform1f(contrastUniform, screenConfig.contrast)
             mesh?.draw()
@@ -440,6 +454,8 @@ internal class RenderLoop(
             uniform samplerExternalOES uVideoTexture;
             uniform vec2 uActiveScale;
             uniform vec2 uSampleScale;
+            uniform vec2 uStereoUvOffset;
+            uniform vec2 uStereoUvScale;
             uniform float uBrightness;
             uniform float uContrast;
             in vec2 vTextureCoordinate;
@@ -453,6 +469,7 @@ internal class RenderLoop(
                 }
                 vec2 normalized = centered / uActiveScale;
                 vec2 sampleCoordinate = normalized * uSampleScale + vec2(0.5);
+                sampleCoordinate = uStereoUvOffset + sampleCoordinate * uStereoUvScale;
                 vec4 color = texture(uVideoTexture, sampleCoordinate);
                 color.rgb = (color.rgb - vec3(0.5)) * uContrast + vec3(0.5);
                 color.rgb *= uBrightness;

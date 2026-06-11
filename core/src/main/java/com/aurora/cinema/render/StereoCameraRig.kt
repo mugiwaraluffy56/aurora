@@ -7,11 +7,47 @@ data class StereoConfig(
     val nearPlane: Float = 0.1f,
     val farPlane: Float = 100f,
     val renderMode: StereoRenderMode = StereoRenderMode.Direct,
+    val videoLayout: StereoVideoLayout = StereoVideoLayout.Mono,
+    val swapEyes: Boolean = false,
 )
 
 enum class StereoRenderMode(val label: String) {
     Direct("Direct"),
     Offscreen("Offscreen"),
+}
+
+enum class StereoVideoLayout(val label: String) {
+    Mono("Mono"),
+    SideBySide("Side-by-side"),
+    OverUnder("Over-under"),
+}
+
+data class UvRect(
+    val offsetX: Float,
+    val offsetY: Float,
+    val scaleX: Float,
+    val scaleY: Float,
+)
+
+object StereoVideoUvMapper {
+    fun rect(layout: StereoVideoLayout, rightEye: Boolean, swapEyes: Boolean): UvRect {
+        val effectiveRightEye = if (swapEyes) !rightEye else rightEye
+        return when (layout) {
+            StereoVideoLayout.Mono -> UvRect(0f, 0f, 1f, 1f)
+            StereoVideoLayout.SideBySide -> UvRect(
+                offsetX = if (effectiveRightEye) 0.5f else 0f,
+                offsetY = 0f,
+                scaleX = 0.5f,
+                scaleY = 1f,
+            )
+            StereoVideoLayout.OverUnder -> UvRect(
+                offsetX = 0f,
+                offsetY = if (effectiveRightEye) 0.5f else 0f,
+                scaleX = 1f,
+                scaleY = 0.5f,
+            )
+        }
+    }
 }
 
 data class StereoEyeMatrices(
