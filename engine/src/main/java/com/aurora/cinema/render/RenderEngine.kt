@@ -64,6 +64,10 @@ class RenderEngine {
         post { setVideoProjection(projection) }
     }
 
+    fun setTheatreSceneConfig(config: TheatreSceneConfig) {
+        post { setTheatreSceneConfig(config) }
+    }
+
     fun setHeadsetProfile(profile: HeadsetProfile) {
         post { setHeadsetProfile(profile) }
     }

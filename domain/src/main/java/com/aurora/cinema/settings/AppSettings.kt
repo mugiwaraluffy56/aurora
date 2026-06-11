@@ -5,6 +5,7 @@ import com.aurora.cinema.input.HardwareInputSettings
 import com.aurora.cinema.render.CinemaScreenConfig
 import com.aurora.cinema.render.HeadsetProfile
 import com.aurora.cinema.render.StereoConfig
+import com.aurora.cinema.render.TheatreSceneConfig
 import com.aurora.cinema.render.VideoProjection
 
 data class AppSettings(
@@ -14,6 +15,7 @@ data class AppSettings(
     val cinemaScreenConfig: CinemaScreenConfig = CinemaScreenConfig(),
     val stereoConfig: StereoConfig = StereoConfig(),
     val videoProjection: VideoProjection = VideoProjection.Cinema,
+    val theatreSceneConfig: TheatreSceneConfig = TheatreSceneConfig(),
     val headsetProfile: HeadsetProfile = HeadsetProfile(),
     val subtitleSettings: SubtitleSettings = SubtitleSettings(),
     val hardwareInputSettings: HardwareInputSettings = HardwareInputSettings(),

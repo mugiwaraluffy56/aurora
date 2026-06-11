@@ -143,6 +143,7 @@ import com.aurora.cinema.render.ScreenCropMode
 import com.aurora.cinema.render.StereoConfig
 import com.aurora.cinema.render.StereoRenderMode
 import com.aurora.cinema.render.StereoVideoLayout
+import com.aurora.cinema.render.TheatreSceneMode
 import com.aurora.cinema.render.VideoProjection
 import com.aurora.cinema.session.AndroidSessionEnvironment
 import com.aurora.cinema.session.SessionComfortPolicy
@@ -1148,6 +1149,12 @@ private fun PlayerScreen(
         renderEngine.setVideoProjection(videoProjection)
     }
 
+    LaunchedEffect(appContainer.settingsRepository, appContainer) {
+        appContainer.settingsRepository.settings.collect { settings ->
+            renderEngine.setTheatreSceneConfig(settings.theatreSceneConfig)
+        }
+    }
+
     LaunchedEffect(vrMode, comfortModeEnabled) {
         while (vrMode) {
             val environment = AndroidSessionEnvironment.read(
@@ -1650,6 +1657,10 @@ private fun RendererScreen(
         renderEngine.setVideoProjection(settings.videoProjection)
     }
 
+    LaunchedEffect(settings.theatreSceneConfig) {
+        renderEngine.setTheatreSceneConfig(settings.theatreSceneConfig)
+    }
+
     LaunchedEffect(settings.headsetProfile) {
         renderEngine.setHeadsetProfile(settings.headsetProfile)
     }
@@ -1727,6 +1738,22 @@ private fun RendererScreen(
                     selected = settings.videoProjection == projection,
                     onClick = { scope.launch { repository.setVideoProjection(projection) } },
                     label = { Text(projection.label) },
+                    colors = glassChipColors(),
+                )
+            }
+        }
+        Spacer(modifier = Modifier.height(20.dp))
+        SectionLabel("SCENE")
+        FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            TheatreSceneMode.entries.forEach { mode ->
+                FilterChip(
+                    selected = settings.theatreSceneConfig.mode == mode,
+                    onClick = {
+                        scope.launch {
+                            repository.setTheatreSceneConfig(settings.theatreSceneConfig.copy(mode = mode))
+                        }
+                    },
+                    label = { Text(mode.label) },
                     colors = glassChipColors(),
                 )
             }
@@ -2787,6 +2814,8 @@ private fun AuroraAppPreview() {
                     override suspend fun setStereoConfig(config: StereoConfig) = Unit
 
                     override suspend fun setVideoProjection(projection: VideoProjection) = Unit
+
+                    override suspend fun setTheatreSceneConfig(config: com.aurora.cinema.render.TheatreSceneConfig) = Unit
 
                     override suspend fun setHeadsetProfile(profile: com.aurora.cinema.render.HeadsetProfile) = Unit
 

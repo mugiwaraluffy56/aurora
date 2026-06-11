@@ -16,6 +16,7 @@ internal class RenderLoop(
     private var compositeShader: ShaderProgram? = null
     private var mesh: Mesh? = null
     private var compositeMesh: Mesh? = null
+    private var theatreSceneRenderer: TheatreSceneRenderer? = null
     private var leftEyeTarget: EyeFramebuffer? = null
     private var rightEyeTarget: EyeFramebuffer? = null
     private var videoSampler: VideoFrameSampler? = null
@@ -30,6 +31,7 @@ internal class RenderLoop(
     private var screenConfig = CinemaScreenConfig()
     private var stereoConfig = StereoConfig()
     private var videoProjection = VideoProjection.Cinema
+    private var theatreSceneConfig = TheatreSceneConfig()
     private var headsetProfile = HeadsetProfile()
     private var screenAspectRatio = 16f / 9f
     private var projectionMatrix = MatrixMath.identity()
@@ -121,6 +123,10 @@ internal class RenderLoop(
         rebuildScreenGeometry()
     }
 
+    fun setTheatreSceneConfig(config: TheatreSceneConfig) {
+        theatreSceneConfig = config
+    }
+
     fun setHeadsetProfile(profile: HeadsetProfile) {
         val clamped = profile.clamped()
         if (headsetProfile == clamped) return
@@ -189,6 +195,7 @@ internal class RenderLoop(
                     "uChromaticAberration",
                 )
                 compositeMesh = Mesh.screenQuad()
+                theatreSceneRenderer = TheatreSceneRenderer()
                 updateCameraMatrices()
                 rebuildScreenGeometry()
                 diagnosticOverlay = DiagnosticOverlay()
@@ -251,6 +258,7 @@ internal class RenderLoop(
             onVideoSurface(null)
             videoSampler?.release()
             diagnosticOverlay?.release()
+            theatreSceneRenderer?.release()
             mesh?.release()
             compositeMesh?.release()
             compositeShader?.release()
@@ -259,6 +267,7 @@ internal class RenderLoop(
         releaseEyeTargets()
         videoSampler = null
         diagnosticOverlay = null
+        theatreSceneRenderer = null
         mesh = null
         compositeMesh = null
         videoShader = null
@@ -355,6 +364,11 @@ internal class RenderLoop(
                 swapEyes = stereoConfig.swapEyes,
             )
             shader.use()
+            if (theatreSceneConfig.mode == TheatreSceneMode.Theatre && videoProjection == VideoProjection.Cinema) {
+                GLES30.glBindTexture(android.opengl.GLES11Ext.GL_TEXTURE_EXTERNAL_OES, 0)
+                theatreSceneRenderer?.draw(viewProjection)
+                shader.use()
+            }
             GLES30.glActiveTexture(GLES30.GL_TEXTURE0)
             GLES30.glBindTexture(android.opengl.GLES11Ext.GL_TEXTURE_EXTERNAL_OES, sampler.textureId)
             GLES30.glUniform1i(videoTextureUniform, 0)
