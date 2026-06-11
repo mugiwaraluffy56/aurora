@@ -80,6 +80,10 @@ class RenderEngine {
         post { setHeadPose(viewMatrix) }
     }
 
+    fun setAngularVelocity(radsPerSec: Float) {
+        post { setAngularVelocity(radsPerSec) }
+    }
+
     fun release() {
         if (released) return
         released = true

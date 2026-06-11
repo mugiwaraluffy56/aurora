@@ -76,7 +76,17 @@ object HeadPoseMath {
     }
 
     fun viewMatrix(current: Quaternion, recenter: Quaternion): FloatArray {
-        val relative = multiply(conjugate(current), recenter)
+        // Android TYPE_GAME_ROTATION_VECTOR uses portrait-mode device axes.
+        // VR runs in landscape. Apply -90° around device Z to remap coordinate frame:
+        //   landscape_up   = device +X
+        //   landscape_right = device -Y
+        //   landscape_fwd  = device +Z (into screen)
+        // Resulting rotation matrix row0=[0,-1,0], row1=[1,0,0], row2=[0,0,1]
+        // which is exactly the -90°Z rotation: sin(-45°)=-0.7071, cos(-45°)=0.7071
+        val adj = Quaternion(x = 0f, y = 0f, z = -0.7071f, w = 0.7071f)
+        val corrCurrent = multiply(current, adj)
+        val corrRecenter = multiply(recenter, adj)
+        val relative = multiply(conjugate(corrCurrent), corrRecenter)
         return rotationMatrix(relative)
     }
 
@@ -121,7 +131,10 @@ object HeadPoseMath {
 }
 
 class HeadPoseSmoother(
-    private val amount: Float = 0.18f,
+    // 0.8 = 80% new data per sample. At SENSOR_DELAY_FASTEST (~1000Hz) this introduces
+    // ~0.7ms lag — imperceptible, but kills high-frequency sensor noise that makes the
+    // video appear to jitter/float.
+    private val amount: Float = 0.8f,
 ) {
     private var current: Quaternion? = null
 
@@ -131,11 +144,7 @@ class HeadPoseSmoother(
 
     fun smooth(input: Quaternion): Quaternion {
         val previous = current
-        val next = if (previous == null) {
-            input
-        } else {
-            HeadPoseMath.slerp(previous, input, amount)
-        }
+        val next = if (previous == null) input else HeadPoseMath.slerp(previous, input, amount)
         current = next
         return next
     }
@@ -145,4 +154,5 @@ data class HeadPose(
     val viewMatrix: FloatArray = MatrixMath.identity(),
     val tracking: Boolean = false,
     val sensorName: String = "Unavailable",
+    val angularVelocityRadsPerSec: Float = 0f,
 )

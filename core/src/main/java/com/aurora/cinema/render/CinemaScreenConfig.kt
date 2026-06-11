@@ -1,14 +1,19 @@
 package com.aurora.cinema.render
 
 data class CinemaScreenConfig(
+    // Source = use video's actual aspect ratio (handles 16:9 / 21:9 / IMAX automatically)
     val aspectRatioMode: ScreenAspectRatio = ScreenAspectRatio.Source,
-    val distanceMeters: Float = 8f,
-    val widthMeters: Float = 18f,
-    val verticalOffsetMeters: Float = 0f,
-    val curvatureRadiusMeters: Float = 0f,
+    // JioDive + S24 FE: 20m wide at 5m = ~106° horizontal fill
+    // 21:9 → screen is 20×8.6m  (fills horizontal FOV perfectly)
+    // 16:9 → screen is 20×11.2m (slightly taller, still immersive)
+    // IMAX 1.43:1 → screen is 20×14m (towering, true IMAX feel)
+    val distanceMeters: Float = 5f,
+    val widthMeters: Float = 20f,
+    val verticalOffsetMeters: Float = -0.2f,
+    val curvatureRadiusMeters: Float = 16f,
     val tiltDegrees: Float = 0f,
     val brightness: Float = 1f,
-    val contrast: Float = 1f,
+    val contrast: Float = 1.05f,
     val cropMode: ScreenCropMode = ScreenCropMode.Fit,
 )
 

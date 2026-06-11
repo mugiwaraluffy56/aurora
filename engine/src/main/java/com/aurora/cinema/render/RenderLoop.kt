@@ -52,6 +52,11 @@ internal class RenderLoop(
     private var distortionCoefficientsUniform = -1
     private var lensCenterUniform = -1
     private var chromaticAberrationUniform = -1
+    private var comfortVignetteUniform = -1    // #4 fast-turn vignette
+    private var angularVelocity = 0f           // rads/sec from head tracker
+    private var autobrightness = 1f            // #6 current smoothed auto-brightness
+    private var lumaSampleCounter = 0          // #6 frame counter for luminance sampling
+    private val lumaPixelBuf = java.nio.IntBuffer.allocate(1)
     private var renderedFrames = 0L
     private var droppedFrames = 0L
 
@@ -146,6 +151,10 @@ internal class RenderLoop(
         updateCameraMatrices()
     }
 
+    fun setAngularVelocity(radsPerSec: Float) {
+        angularVelocity = radsPerSec
+    }
+
     fun release() {
         resumed = false
         frameClock.stop()
@@ -194,6 +203,10 @@ internal class RenderLoop(
                 chromaticAberrationUniform = GLES30.glGetUniformLocation(
                     checkNotNull(compositeShader).id,
                     "uChromaticAberration",
+                )
+                comfortVignetteUniform = GLES30.glGetUniformLocation(
+                    checkNotNull(compositeShader).id,
+                    "uComfortVignette",
                 )
                 compositeMesh = Mesh.screenQuad()
                 theatreSceneRenderer = TheatreSceneRenderer()
@@ -379,7 +392,7 @@ internal class RenderLoop(
             GLES30.glUniform2f(sampleScaleUniform, contentMapping.sampleScaleX, contentMapping.sampleScaleY)
             GLES30.glUniform2f(stereoUvOffsetUniform, uvRect.offsetX, uvRect.offsetY)
             GLES30.glUniform2f(stereoUvScaleUniform, uvRect.scaleX, uvRect.scaleY)
-            GLES30.glUniform1f(brightnessUniform, screenConfig.brightness)
+            GLES30.glUniform1f(brightnessUniform, screenConfig.brightness * autobrightness)
             GLES30.glUniform1f(contrastUniform, screenConfig.contrast)
             mesh?.draw()
             GLES30.glBindTexture(android.opengl.GLES11Ext.GL_TEXTURE_EXTERNAL_OES, 0)
@@ -398,23 +411,39 @@ internal class RenderLoop(
 
     private fun compositeEyes(eyeWidth: Int) {
         val shader = compositeShader ?: return
+
+        // #6 Auto-brightness: sample 1×1 center pixel of left eye every 90 frames
+        if (++lumaSampleCounter >= 90) {
+            lumaSampleCounter = 0
+            leftEyeTarget?.bind()
+            lumaPixelBuf.rewind()
+            GLES30.glReadPixels(eyeWidth / 2, height / 2, 1, 1, GLES30.GL_RGBA, GLES30.GL_UNSIGNED_BYTE, lumaPixelBuf)
+            val px = lumaPixelBuf.get(0)
+            val r = (px and 0xFF) / 255f
+            val g = ((px ushr 8) and 0xFF) / 255f
+            val b = ((px ushr 16) and 0xFF) / 255f
+            val luma = 0.299f * r + 0.587f * g + 0.114f * b
+            // Dark scenes → slight boost; bright scenes → slight dim. Range 0.85–1.15
+            val targetBrightness = (1.15f - luma * 0.30f).coerceIn(0.85f, 1.15f)
+            autobrightness += (targetBrightness - autobrightness) * 0.08f
+            GLES30.glBindFramebuffer(GLES30.GL_FRAMEBUFFER, 0)
+        }
+
+        // #4 Comfort vignette: tight when rotating fast, normal when still
+        // 0 = normal vignette, 1 = max comfort squeeze (narrowest FOV feel)
+        val comfortStrength = (angularVelocity / 3.5f).coerceIn(0f, 1f)
+
         GLES30.glBindFramebuffer(GLES30.GL_FRAMEBUFFER, 0)
         GLES30.glClear(GLES30.GL_COLOR_BUFFER_BIT)
         shader.use()
         GLES30.glActiveTexture(GLES30.GL_TEXTURE0)
         GLES30.glUniform1i(compositeTextureUniform, 0)
-        GLES30.glUniform3f(
-            distortionCoefficientsUniform,
-            headsetProfile.distortionK1,
-            headsetProfile.distortionK2,
-            headsetProfile.distortionK3,
-        )
+        GLES30.glUniform3f(distortionCoefficientsUniform,
+            headsetProfile.distortionK1, headsetProfile.distortionK2, headsetProfile.distortionK3)
         GLES30.glUniform2f(lensCenterUniform, 0.5f, 0.5f + headsetProfile.verticalLensOffset)
-        GLES30.glUniform2f(
-            chromaticAberrationUniform,
-            headsetProfile.chromaticAberrationRed,
-            headsetProfile.chromaticAberrationBlue,
-        )
+        GLES30.glUniform2f(chromaticAberrationUniform,
+            headsetProfile.chromaticAberrationRed, headsetProfile.chromaticAberrationBlue)
+        GLES30.glUniform1f(comfortVignetteUniform, comfortStrength)
         GLES30.glViewport(0, 0, eyeWidth, height)
         GLES30.glBindTexture(GLES30.GL_TEXTURE_2D, leftEyeTarget?.textureId ?: 0)
         compositeMesh?.draw()
@@ -521,8 +550,10 @@ internal class RenderLoop(
             uniform vec3 uDistortion;
             uniform vec2 uLensCenter;
             uniform vec2 uChromaticAberration;
+            uniform float uComfortVignette;  // 0=normal 1=max squeeze (#4)
             in vec2 vTextureCoordinate;
             out vec4 fragmentColor;
+
             vec2 distortedCoordinate(vec2 coordinate, float channelOffset) {
                 vec2 centered = coordinate - uLensCenter;
                 float radiusSquared = dot(centered, centered);
@@ -533,19 +564,37 @@ internal class RenderLoop(
                     channelOffset;
                 return uLensCenter + centered * scale;
             }
+
             void main() {
-                vec2 redCoordinate = distortedCoordinate(vTextureCoordinate, uChromaticAberration.x);
+                vec2 redCoordinate   = distortedCoordinate(vTextureCoordinate, uChromaticAberration.x);
                 vec2 greenCoordinate = distortedCoordinate(vTextureCoordinate, 0.0);
-                vec2 blueCoordinate = distortedCoordinate(vTextureCoordinate, uChromaticAberration.y);
+                vec2 blueCoordinate  = distortedCoordinate(vTextureCoordinate, uChromaticAberration.y);
+
+                // #3 Screen glow: out-of-bounds pixels spill edge color with distance falloff
                 if (greenCoordinate.x < 0.0 || greenCoordinate.x > 1.0 ||
                     greenCoordinate.y < 0.0 || greenCoordinate.y > 1.0) {
-                    fragmentColor = vec4(0.0, 0.0, 0.0, 1.0);
+                    vec2 clamped = clamp(greenCoordinate, 0.0, 1.0);
+                    float edgeDist = length(greenCoordinate - clamped);
+                    float glow = max(0.0, 1.0 - edgeDist * 14.0) * 0.07;
+                    vec3 edgeCol = texture(uTexture, clamped).rgb;
+                    float luma = dot(edgeCol, vec3(0.299, 0.587, 0.114));
+                    fragmentColor = vec4(edgeCol * glow * luma, 1.0);
                     return;
                 }
-                float red = texture(uTexture, redCoordinate).r;
+
+                float red   = texture(uTexture, redCoordinate).r;
                 float green = texture(uTexture, greenCoordinate).g;
-                float blue = texture(uTexture, blueCoordinate).b;
-                fragmentColor = vec4(red, green, blue, 1.0);
+                float blue  = texture(uTexture, blueCoordinate).b;
+
+                // #4 Comfort vignette tightens on fast head turns
+                // Normal: smoothstep 0.55→1.05. Tight: 0.35→0.75
+                vec2 vigCoord = vTextureCoordinate * 2.0 - 1.0;
+                float r2 = dot(vigCoord, vigCoord);
+                float vigStart = mix(0.55, 0.28, uComfortVignette);
+                float vigEnd   = mix(1.05, 0.65, uComfortVignette);
+                float vignette = 1.0 - smoothstep(vigStart, vigEnd, r2);
+
+                fragmentColor = vec4(red * vignette, green * vignette, blue * vignette, 1.0);
             }
         """.trimIndent()
     }

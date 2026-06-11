@@ -1,18 +1,22 @@
 package com.aurora.cinema.render
 
 data class HeadsetProfile(
-    val id: String = "default",
-    val name: String = "Default headset",
-    val ipdMeters: Float = 0.064f,
-    val fovDegrees: Float = 90f,
-    val screenToLensDistance: Float = 0.04f,
-    val interLensDistance: Float = 0.064f,
+    val id: String = "jiodive",
+    val name: String = "JioDive",
+    // JioDive fixed IPD ~62mm, Fresnel lenses, ~96° FOV
+    // Paired with Samsung Galaxy S24 FE (2340×1080, 6.7")
+    val ipdMeters: Float = 0.062f,
+    val fovDegrees: Float = 96f,
+    val screenToLensDistance: Float = 0.038f,
+    val interLensDistance: Float = 0.062f,
     val verticalLensOffset: Float = 0f,
-    val distortionK1: Float = 0.22f,
-    val distortionK2: Float = 0.24f,
-    val distortionK3: Float = 0f,
-    val chromaticAberrationRed: Float = 0f,
-    val chromaticAberrationBlue: Float = 0f,
+    // JioDive Fresnel lens distortion — stronger than basic Cardboard
+    val distortionK1: Float = 0.33f,
+    val distortionK2: Float = 0.28f,
+    val distortionK3: Float = 0.02f,
+    // Slight chromatic aberration from Fresnel lenses
+    val chromaticAberrationRed: Float = 0.006f,
+    val chromaticAberrationBlue: Float = -0.006f,
 ) {
     fun clamped(): HeadsetProfile = copy(
         ipdMeters = ipdMeters.coerceIn(0.04f, 0.09f),

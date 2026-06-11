@@ -8,9 +8,11 @@ import androidx.media3.common.AudioAttributes
 import androidx.media3.common.C
 import androidx.media3.common.MediaItem
 import androidx.media3.common.Player
+import androidx.media3.common.PlaybackException
 import androidx.media3.common.Tracks
 import androidx.media3.common.VideoSize
 import androidx.media3.common.text.CueGroup
+import androidx.media3.exoplayer.ExoPlaybackException
 import androidx.media3.exoplayer.ExoPlayer
 import com.aurora.cinema.library.VideoItem
 import kotlinx.coroutines.CoroutineScope
@@ -34,6 +36,9 @@ class PlaybackEngine(
     override val mediaPlayer: Player = player
 
     private var selectedVideo: VideoItem? = null
+    private var currentVideoSurface: Surface? = null
+    private var recoveryAttemptedForVideoId: Long? = null
+    private var recoverWhenSurfaceArrives = false
     private var subtitleSettings = SubtitleSettings()
     private var latestSubtitleText = ""
     private var latestTextTracks: List<TimedTextTrack> = emptyList()
@@ -52,10 +57,11 @@ class PlaybackEngine(
                     if (!isPlaying) saveProgress()
                 }
 
-                override fun onPlayerError(error: androidx.media3.common.PlaybackException) {
+                override fun onPlayerError(error: PlaybackException) {
+                    val recoveryQueued = maybeRecoverFromVideoRendererError(error)
                     mutableState.value = mutableState.value.copy(
                         error = PlaybackError(
-                            message = error.localizedMessage ?: "Playback failed",
+                            message = buildPlaybackErrorMessage(error, recoveryQueued),
                             causeName = error.errorCodeName,
                         ),
                     )
@@ -124,6 +130,8 @@ class PlaybackEngine(
     override fun select(video: VideoItem) {
         saveProgress()
         selectedVideo = video
+        recoveryAttemptedForVideoId = null
+        recoverWhenSurfaceArrives = false
         mutableState.value = PlaybackState(selectedVideo = video)
         ensureServiceStarted()
 
@@ -159,6 +167,8 @@ class PlaybackEngine(
         saveProgress()
         player.stop()
         selectedVideo = null
+        recoveryAttemptedForVideoId = null
+        recoverWhenSurfaceArrives = false
         mutableState.value = PlaybackState()
     }
 
@@ -172,7 +182,12 @@ class PlaybackEngine(
     }
 
     override fun setVideoSurface(surface: Surface?) {
+        currentVideoSurface = surface
         player.setVideoSurface(surface)
+        if (surface != null && recoverWhenSurfaceArrives) {
+            recoverWhenSurfaceArrives = false
+            recoverVideoRenderer()
+        }
     }
 
     override fun setSubtitleSettings(settings: SubtitleSettings) {
@@ -200,6 +215,68 @@ class PlaybackEngine(
     private fun ensureServiceStarted() {
         runCatching {
             context.startService(Intent(context, AuroraPlaybackService::class.java))
+        }
+    }
+
+    private fun maybeRecoverFromVideoRendererError(error: PlaybackException): Boolean {
+        if (!isVideoRendererError(error)) return false
+        val video = selectedVideo ?: return false
+        if (recoveryAttemptedForVideoId == video.id) return false
+
+        recoveryAttemptedForVideoId = video.id
+        val surface = currentVideoSurface
+        if (surface == null || !surface.isValid) {
+            recoverWhenSurfaceArrives = true
+            return true
+        }
+
+        recoverVideoRenderer()
+        return true
+    }
+
+    private fun recoverVideoRenderer() {
+        val video = selectedVideo ?: return
+        val resumePosition = player.currentPosition
+            .takeIf { it > 0L }
+            ?: mutableState.value.positionMs
+                .takeIf { it > 0L }
+            ?: video.playbackPositionMs
+        val shouldResume = player.playWhenReady || mutableState.value.isPlaying
+
+        scope.launch {
+            runCatching {
+                player.clearVideoSurface()
+                currentVideoSurface?.takeIf { it.isValid }?.let(player::setVideoSurface)
+                player.setMediaItem(MediaItem.fromUri(Uri.parse(video.uri)), resumePosition)
+                player.prepare()
+                player.playWhenReady = shouldResume
+                mutableState.value = mutableState.value.copy(error = null)
+                syncState()
+            }.onFailure { failure ->
+                mutableState.value = mutableState.value.copy(
+                    error = PlaybackError(
+                        message = "Playback recovery failed: ${failure.localizedMessage ?: failure.javaClass.simpleName}",
+                        causeName = failure.javaClass.simpleName,
+                    ),
+                )
+            }
+        }
+    }
+
+    private fun isVideoRendererError(error: PlaybackException): Boolean {
+        val exoError = error as? ExoPlaybackException ?: return false
+        if (exoError.type != ExoPlaybackException.TYPE_RENDERER) return false
+        val rendererName = exoError.rendererName.orEmpty()
+        val sampleMimeType = exoError.rendererFormat?.sampleMimeType.orEmpty()
+        return rendererName.contains("Video", ignoreCase = true) || sampleMimeType.startsWith("video/")
+    }
+
+    private fun buildPlaybackErrorMessage(error: PlaybackException, recoveryQueued: Boolean): String {
+        val base = error.localizedMessage ?: "Playback failed"
+        return if (recoveryQueued) {
+            "$base\nRetrying video renderer with a fresh surface."
+        } else {
+            base
         }
     }
 }

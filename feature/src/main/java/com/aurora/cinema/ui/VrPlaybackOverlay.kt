@@ -1,50 +1,33 @@
 package com.aurora.cinema.ui
 
-import androidx.compose.foundation.BorderStroke
+import androidx.compose.animation.*
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.BoxScope
-import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.CenterFocusStrong
-import androidx.compose.material.icons.filled.Close
-import androidx.compose.material.icons.filled.Forward10
-import androidx.compose.material.icons.filled.Fullscreen
-import androidx.compose.material.icons.filled.Pause
-import androidx.compose.material.icons.filled.PlayArrow
-import androidx.compose.material.icons.filled.PlayCircle
-import androidx.compose.material.icons.filled.Replay10
-import androidx.compose.material.icons.filled.Settings
-import androidx.compose.material.icons.filled.Tv
-import androidx.compose.material3.Icon
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Surface
-import androidx.compose.material3.Text
-import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
-import androidx.compose.runtime.saveable.rememberSaveable
-import androidx.compose.runtime.setValue
+import androidx.compose.material.icons.filled.*
+import androidx.compose.material3.*
+import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.platform.LocalConfiguration
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import kotlin.math.atan2
+import kotlin.math.sqrt
 import com.aurora.cinema.playback.SubtitleSettings
+import com.aurora.cinema.render.CinemaScreenConfig
 import kotlinx.coroutines.delay
 
 @Composable
@@ -59,238 +42,157 @@ fun VrPlaybackOverlay(
     controlsLocked: Boolean,
     onControlsLockedChange: (Boolean) -> Unit,
     onTarget: (VrGazeTarget) -> Unit,
+    screenConfig: CinemaScreenConfig = CinemaScreenConfig(),
+    onScreenWidthChange: (Float) -> Unit = {},
+    onScreenDistanceChange: (Float) -> Unit = {},
+    positionMs: Long = 0L,
+    durationMs: Long = 1L,
+    onSeek: (Long) -> Unit = {},
 ) {
-    val dwellSelector = remember { VrDwellSelector() }
-    var dwellSelection by remember { mutableStateOf(DwellSelection()) }
-    var overlayVisible by rememberSaveable { mutableStateOf(true) }
+    var showControls by remember { mutableStateOf(false) }
+    var recenterFlash by remember { mutableStateOf(false) }
 
-    LaunchedEffect(viewMatrix, controlsLocked, overlayVisible) {
-        while (true) {
-            val target = if (controlsLocked || !overlayVisible) {
-                VrGazeTarget.None
-            } else {
-                VrGazeMapper.targetFromViewMatrix(viewMatrix)
-            }
-            val nextSelection = dwellSelector.update(target, System.currentTimeMillis())
-            dwellSelection = nextSelection
-            if (nextSelection.fired != VrGazeTarget.None) {
-                if (nextSelection.fired == VrGazeTarget.LockControls) {
-                    onControlsLockedChange(!controlsLocked)
-                }
-                onTarget(nextSelection.fired)
-            }
-            delay(100L)
-        }
+    // #7 Head-locked UI: extract yaw/pitch from viewMatrix → screen-space offset
+    // viewMatrix is column-major. Forward = -col2 = (-m[8], -m[9], -m[10])
+    val screenWidthDp = LocalConfiguration.current.screenWidthDp
+    val density = LocalDensity.current.density
+    val fovRad = (screenWidthDp / 360f) * (2f * Math.PI.toFloat()) * 0.5f // rough per-eye FOV
+    val headLockOffsetX: Float
+    val headLockOffsetY: Float
+    if (viewMatrix.size == 16) {
+        val fx = -viewMatrix[8]; val fy = -viewMatrix[9]; val fz = -viewMatrix[10]
+        val yaw   = atan2(fx, fz)
+        val pitch = atan2(fy, sqrt(fx * fx + fz * fz))
+        val pxPerRad = (screenWidthDp * density) / (fovRad * 2f)
+        headLockOffsetX = -yaw * pxPerRad
+        headLockOffsetY =  pitch * pxPerRad
+    } else {
+        headLockOffsetX = 0f; headLockOffsetY = 0f
     }
 
-    Box(modifier = Modifier.fillMaxSize()) {
-        if (overlayVisible) {
-            VrPlaybackControls(
-                isPlaying = isPlaying,
-                progressLabel = progressLabel,
-                dwellSelection = dwellSelection,
-                onTarget = onTarget,
-            )
-        }
-        VrGazeCursor(locked = controlsLocked)
-        VrSubtitleLayer(
-            subtitleText = subtitleText,
-            settings = subtitleSettings,
-        )
-        VrSystemControls(
-            controlsLocked = controlsLocked,
-            dwellSelection = dwellSelection,
-            onToggleOverlay = { overlayVisible = !overlayVisible },
-            onToggleLock = {
-                onControlsLockedChange(!controlsLocked)
-                onTarget(VrGazeTarget.LockControls)
-            },
-            onTarget = onTarget,
-        )
-        VrStatusPill(
-            tracking = tracking,
-            sensorName = sensorName,
-            controlsLocked = controlsLocked,
-            selection = dwellSelection,
-        )
+    LaunchedEffect(showControls) {
+        if (showControls) { delay(6000); showControls = false }
     }
-}
-
-@Composable
-private fun BoxScope.VrSubtitleLayer(
-    subtitleText: String,
-    settings: SubtitleSettings,
-) {
-    if (!settings.enabled || subtitleText.isBlank()) return
-    Surface(
-        modifier = Modifier
-            .align(Alignment.BottomCenter)
-            .padding(
-                start = 24.dp,
-                end = 24.dp,
-                bottom = (92 + (settings.verticalOffset * 120f).toInt()).dp,
-            )
-            .widthIn(max = 720.dp),
-        color = Color.Black.copy(alpha = 0.62f),
-        shape = RoundedCornerShape(12.dp),
-    ) {
-        Text(
-            text = subtitleText,
-            modifier = Modifier.padding(horizontal = 18.dp, vertical = 10.dp),
-            color = Color.White,
-            style = MaterialTheme.typography.bodyLarge.copy(fontSize = (20f * settings.sizeScale).sp),
-        )
+    LaunchedEffect(recenterFlash) {
+        if (recenterFlash) { delay(500); recenterFlash = false }
     }
-}
 
-@Composable
-private fun BoxScope.VrPlaybackControls(
-    isPlaying: Boolean,
-    progressLabel: String,
-    dwellSelection: DwellSelection,
-    onTarget: (VrGazeTarget) -> Unit,
-) {
-    Column(
-        modifier = Modifier
-            .align(Alignment.Center)
-            .padding(20.dp),
-        horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.spacedBy(14.dp),
-    ) {
-        Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-            VrGazeButton(VrGazeTarget.Back, dwellSelection, Icons.Default.Replay10, "Back", onTarget)
-            VrGazeButton(
-                target = VrGazeTarget.PlayPause,
-                selection = dwellSelection,
-                icon = if (isPlaying) Icons.Default.Pause else Icons.Default.PlayArrow,
-                label = if (isPlaying) "Pause" else "Play",
-                onTarget = onTarget,
-            )
-            VrGazeButton(VrGazeTarget.Forward, dwellSelection, Icons.Default.Forward10, "Forward", onTarget)
-        }
-        Text(
-            text = progressLabel,
-            color = Color.White,
-            style = MaterialTheme.typography.labelMedium,
-        )
-        Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-            VrGazeButton(VrGazeTarget.ScreenSmaller, dwellSelection, Icons.Default.Tv, "Smaller", onTarget)
-            VrGazeButton(VrGazeTarget.Timeline, dwellSelection, Icons.Default.PlayCircle, "Middle", onTarget)
-            VrGazeButton(VrGazeTarget.ScreenLarger, dwellSelection, Icons.Default.Fullscreen, "Larger", onTarget)
-        }
-    }
-}
-
-@Composable
-private fun BoxScope.VrGazeCursor(locked: Boolean) {
     Box(
         modifier = Modifier
-            .align(Alignment.Center)
-            .size(10.dp)
-            .background(Color.White.copy(alpha = if (locked) 0.22f else 0.72f), CircleShape),
-    )
-}
-
-@Composable
-private fun BoxScope.VrSystemControls(
-    controlsLocked: Boolean,
-    dwellSelection: DwellSelection,
-    onToggleOverlay: () -> Unit,
-    onToggleLock: () -> Unit,
-    onTarget: (VrGazeTarget) -> Unit,
-) {
-    Row(
-        modifier = Modifier
-            .align(Alignment.TopEnd)
-            .padding(16.dp),
-        horizontalArrangement = Arrangement.spacedBy(8.dp),
-    ) {
-        VrGazeButton(VrGazeTarget.Recenter, dwellSelection, Icons.Default.CenterFocusStrong, "Recenter", onTarget)
-        VrGazeButton(
-            target = VrGazeTarget.LockControls,
-            selection = dwellSelection,
-            icon = Icons.Default.Settings,
-            label = if (controlsLocked) "Unlock" else "Lock",
-            onTarget = { onToggleLock() },
-        )
-        VrGazeButton(VrGazeTarget.Timeline, dwellSelection, Icons.Default.PlayCircle, "Overlay", onTarget = {
-            onToggleOverlay()
-        })
-        VrGazeButton(VrGazeTarget.Exit, dwellSelection, Icons.Default.Close, "Exit", onTarget)
-    }
-}
-
-@Composable
-private fun BoxScope.VrStatusPill(
-    tracking: Boolean,
-    sensorName: String,
-    controlsLocked: Boolean,
-    selection: DwellSelection,
-) {
-    Surface(
-        modifier = Modifier
-            .align(Alignment.BottomCenter)
-            .padding(16.dp),
-        color = MaterialTheme.colorScheme.surface.copy(alpha = 0.72f),
-        shape = RoundedCornerShape(14.dp),
-    ) {
-        Text(
-            text = if (controlsLocked) {
-                "Controls locked"
-            } else if (tracking) {
-                "Gaze ${selection.target.name.lowercase()} ${(selection.progress * 100).toInt()}%"
-            } else {
-                sensorName
-            },
-            modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp),
-            style = MaterialTheme.typography.labelMedium,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
-    }
-}
-
-@Composable
-private fun VrGazeButton(
-    target: VrGazeTarget,
-    selection: DwellSelection,
-    icon: ImageVector,
-    label: String,
-    onTarget: (VrGazeTarget) -> Unit,
-) {
-    val active = selection.target == target
-    val semanticLabel = "${target.name}: $label"
-    Surface(
-        modifier = Modifier.widthIn(min = 82.dp),
-        color = MaterialTheme.colorScheme.surface.copy(alpha = if (active) 0.9f else 0.72f),
-        contentColor = MaterialTheme.colorScheme.onSurface,
-        shape = RoundedCornerShape(14.dp),
-        border = BorderStroke(
-            width = 1.dp,
-            color = MaterialTheme.colorScheme.primary.copy(alpha = if (active) 0.95f else 0.22f),
-        ),
-    ) {
-        Column(
-            modifier = Modifier
-                .clickable { onTarget(target) }
-                .padding(horizontal = 12.dp, vertical = 10.dp),
-            horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.spacedBy(4.dp),
-        ) {
-            Icon(icon, contentDescription = semanticLabel, modifier = Modifier.size(24.dp))
-            Text(text = label, style = MaterialTheme.typography.labelSmall)
-            Box(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(3.dp)
-                    .background(MaterialTheme.colorScheme.outline.copy(alpha = 0.18f), RoundedCornerShape(8.dp)),
-            ) {
-                Box(
-                    modifier = Modifier
-                        .fillMaxWidth(selection.progress.coerceIn(0f, 1f))
-                        .height(3.dp)
-                        .background(MaterialTheme.colorScheme.primary, RoundedCornerShape(8.dp)),
+            .fillMaxSize()
+            .pointerInput(Unit) {
+                detectTapGestures(
+                    onTap = { showControls = !showControls },
+                    onDoubleTap = {
+                        onTarget(VrGazeTarget.Recenter)
+                        recenterFlash = true
+                        showControls = false
+                    },
                 )
+            },
+    ) {
+        // Recenter flash
+        if (recenterFlash) {
+            Box(modifier = Modifier.align(Alignment.Center).size(64.dp)
+                .background(Color.White.copy(alpha = 0.18f), CircleShape))
+        }
+
+        // Gaze cursor
+        Box(modifier = Modifier.align(Alignment.Center).size(7.dp)
+            .background(Color.White.copy(alpha = 0.60f), CircleShape))
+
+        // Subtitle — head-locked
+        if (subtitleSettings.enabled && subtitleText.isNotBlank()) {
+            Surface(
+                modifier = Modifier.align(Alignment.BottomCenter)
+                    .graphicsLayer { translationX = headLockOffsetX; translationY = headLockOffsetY * 0.3f }
+                    .padding(horizontal = 24.dp, vertical = 56.dp).widthIn(max = 720.dp),
+                color = Color.Black.copy(alpha = 0.62f), shape = RoundedCornerShape(12.dp),
+            ) {
+                Text(subtitleText, modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
+                    color = Color.White, fontSize = (18f * subtitleSettings.sizeScale).sp)
             }
+        }
+
+        // Compact control bar — head-locked
+        AnimatedVisibility(
+            visible = showControls,
+            modifier = Modifier.align(Alignment.BottomCenter)
+                .graphicsLayer { translationX = headLockOffsetX; translationY = headLockOffsetY * 0.5f },
+            enter = slideInVertically(tween(200)) { it } + fadeIn(tween(200)),
+            exit = slideOutVertically(tween(160)) { it } + fadeOut(tween(160)),
+        ) {
+            Surface(
+                modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 16.dp),
+                color = Color.Black.copy(alpha = 0.78f),
+                shape = RoundedCornerShape(16.dp),
+            ) {
+                Column(modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp),
+                    verticalArrangement = Arrangement.spacedBy(6.dp)) {
+
+                    // Row 1: timeline
+                    val dur = durationMs.coerceAtLeast(1L)
+                    val pos = positionMs.coerceIn(0L, dur)
+                    Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Text(pos.timeLabel(), fontSize = 11.sp, color = Color.White.copy(alpha = 0.55f), fontWeight = FontWeight.W500)
+                        Slider(modifier = Modifier.weight(1f), value = pos.toFloat(),
+                            onValueChange = { onSeek(it.toLong()); showControls = true },
+                            valueRange = 0f..dur.toFloat(),
+                            colors = SliderDefaults.colors(thumbColor = Color.White,
+                                activeTrackColor = Color(0xFF549BFF), inactiveTrackColor = Color.White.copy(alpha = 0.20f)))
+                        Text("-${(dur - pos).coerceAtLeast(0L).timeLabel()}", fontSize = 11.sp,
+                            color = Color.White.copy(alpha = 0.55f), fontWeight = FontWeight.W500)
+                    }
+
+                    // Row 2: [transport] [W slider] [D slider] [recenter][exit]
+                    Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        // Transport
+                        VrCtrlBtn(Icons.Default.Replay10, size = 36) { onTarget(VrGazeTarget.Back) }
+                        VrCtrlBtn(if (isPlaying) Icons.Default.Pause else Icons.Default.PlayArrow, size = 44, accent = true) { onTarget(VrGazeTarget.PlayPause) }
+                        VrCtrlBtn(Icons.Default.Forward10, size = 36) { onTarget(VrGazeTarget.Forward) }
+                        Spacer(Modifier.width(2.dp))
+                        // W slider
+                        Text("W", fontSize = 10.sp, color = Color.White.copy(alpha = 0.40f), fontWeight = FontWeight.W700)
+                        Slider(modifier = Modifier.weight(1f), value = screenConfig.widthMeters,
+                            onValueChange = { onScreenWidthChange(it); showControls = true }, valueRange = 8f..30f,
+                            colors = SliderDefaults.colors(thumbColor = Color.White,
+                                activeTrackColor = Color(0xFF549BFF).copy(alpha = 0.75f), inactiveTrackColor = Color.White.copy(alpha = 0.15f)))
+                        // D slider
+                        Text("D", fontSize = 10.sp, color = Color.White.copy(alpha = 0.40f), fontWeight = FontWeight.W700)
+                        Slider(modifier = Modifier.weight(1f), value = screenConfig.distanceMeters,
+                            onValueChange = { onScreenDistanceChange(it); showControls = true }, valueRange = 2f..20f,
+                            colors = SliderDefaults.colors(thumbColor = Color.White,
+                                activeTrackColor = Color(0xFF549BFF).copy(alpha = 0.75f), inactiveTrackColor = Color.White.copy(alpha = 0.15f)))
+                        Spacer(Modifier.width(2.dp))
+                        // Actions
+                        VrCtrlBtn(Icons.Default.CenterFocusStrong, size = 36) { onTarget(VrGazeTarget.Recenter); recenterFlash = true; showControls = false }
+                        VrCtrlBtn(Icons.Default.Close, size = 36, danger = true) { onTarget(VrGazeTarget.Exit) }
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun VrCtrlBtn(
+    icon: ImageVector,
+    size: Int = 36,
+    accent: Boolean = false,
+    danger: Boolean = false,
+    onClick: () -> Unit,
+) {
+    Surface(
+        modifier = Modifier.size(size.dp).clickable(
+            interactionSource = remember { MutableInteractionSource() }, indication = null, onClick = onClick),
+        color = when { accent -> Color.White.copy(alpha = 0.92f); danger -> Color(0xFFE36A60).copy(alpha = 0.80f); else -> Color.White.copy(alpha = 0.10f) },
+        shape = CircleShape,
+    ) {
+        Box(contentAlignment = Alignment.Center) {
+            Icon(icon, null, tint = if (accent) Color(0xFF0A0B0E) else Color.White,
+                modifier = Modifier.size((size * 0.48f).dp))
         }
     }
 }
