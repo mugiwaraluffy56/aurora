@@ -23,13 +23,13 @@ class MainActivity : ComponentActivity() {
         }
     }
 
-    override fun dispatchKeyEvent(event: KeyEvent): Boolean {
+    override fun onKeyDown(keyCode: Int, event: KeyEvent): Boolean {
         val hardwareInputController = appContainer.hardwareInputController
         if (hardwareInputController is com.aurora.cinema.input.AndroidHardwareInputController &&
             hardwareInputController.dispatchKeyEvent(event)
         ) {
             return true
         }
-        return super.dispatchKeyEvent(event)
+        return super.onKeyDown(keyCode, event)
     }
 }
