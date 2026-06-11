@@ -2,12 +2,17 @@ package com.aurora.cinema.library
 
 import android.content.Context
 import android.content.Intent
+import android.graphics.Bitmap
+import android.media.MediaMetadataRetriever
 import android.net.Uri
 import androidx.documentfile.provider.DocumentFile
 import com.aurora.cinema.library.db.VideoDao
 import com.aurora.cinema.library.db.VideoEntity
+import com.aurora.cinema.library.db.VideoWithProgress
 import com.aurora.cinema.media.CodecSupportStatus
 import com.aurora.cinema.media.MediaProbeResult
+import java.io.File
+import java.security.MessageDigest
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
@@ -22,8 +27,8 @@ class RoomOfflineLibraryRepository(
 ) : OfflineLibraryRepository {
     private val contentResolver = context.contentResolver
 
-    override val videos: Flow<List<VideoItem>> = videoDao.observeVideos().map { entities ->
-        entities.map { entity -> entity.toItem() }
+    override val videos: Flow<List<VideoItem>> = videoDao.observeVideosWithProgress().map { rows ->
+        rows.map { row -> row.toItem() }
     }
 
     override suspend fun importVideo(uri: Uri, sourceType: String): ImportResult = withContext(ioDispatcher) {
@@ -33,7 +38,8 @@ class RoomOfflineLibraryRepository(
             sourceType = sourceType,
             persistedPermission = hasPersistedPermission(uri),
         )
-        videoDao.insertOrReplace(metadata.toEntity(now = System.currentTimeMillis()))
+        val existing = videoDao.getVideoByUri(uri.toString())
+        videoDao.insertOrReplace(metadata.toEntity(now = System.currentTimeMillis(), existing = existing))
         ImportResult(importedCount = 1, skippedCount = 0)
     }
 
@@ -54,7 +60,8 @@ class RoomOfflineLibraryRepository(
                     persistedPermission = hasPersistedTreePermission(uri),
                     fallbackName = document.name,
                 )
-                videoDao.insertOrReplace(metadata.toEntity(now = System.currentTimeMillis()))
+                val existing = videoDao.getVideoByUri(document.uri.toString())
+                videoDao.insertOrReplace(metadata.toEntity(now = System.currentTimeMillis(), existing = existing))
                 imported += 1
             } else {
                 skipped += 1
@@ -80,6 +87,10 @@ class RoomOfflineLibraryRepository(
                 lastAccessCheckAt = now,
             )
         }
+    }
+
+    override suspend fun renameDisplayTitle(videoId: Long, title: String) = withContext(ioDispatcher) {
+        videoDao.updateDisplayTitle(videoId, title.trim())
     }
 
     override suspend fun deleteLibraryEntry(videoId: Long) {
@@ -113,15 +124,18 @@ class RoomOfflineLibraryRepository(
         }
     }
 
-    private fun VideoMetadata.toEntity(now: Long): VideoEntity {
+    private fun VideoMetadata.toEntity(now: Long, existing: VideoEntity?): VideoEntity {
         return VideoEntity(
+            id = existing?.id ?: 0L,
             uri = uri,
             displayName = displayName,
+            displayTitleOverride = existing?.displayTitleOverride.orEmpty(),
+            thumbnailPath = existing?.thumbnailPath?.ifBlank { null } ?: createThumbnail(Uri.parse(uri)).orEmpty(),
             durationMs = durationMs,
             width = width,
             height = height,
             mimeType = mimeType,
-            dateAdded = now,
+            dateAdded = existing?.dateAdded ?: now,
             lastSeenAt = now,
             sourceType = sourceType,
             persistedPermission = persistedPermission,
@@ -141,38 +155,75 @@ class RoomOfflineLibraryRepository(
         )
     }
 
-    private fun VideoEntity.toItem(): VideoItem {
+    private fun VideoWithProgress.toItem(): VideoItem {
+        val entity = video
         return VideoItem(
-            id = id,
-            uri = uri,
-            displayName = displayName,
-            durationMs = durationMs,
-            width = width,
-            height = height,
-            mimeType = mimeType,
-            dateAdded = dateAdded,
-            lastSeenAt = lastSeenAt,
-            sourceType = sourceType,
-            persistedPermission = persistedPermission,
-            lastAccessCheckAt = lastAccessCheckAt,
-            accessState = runCatching { VideoAccessState.valueOf(accessState) }
+            id = entity.id,
+            uri = entity.uri,
+            displayName = entity.displayTitleOverride.ifBlank { entity.displayName },
+            displayTitleOverride = entity.displayTitleOverride,
+            thumbnailPath = entity.thumbnailPath,
+            durationMs = entity.durationMs,
+            width = entity.width,
+            height = entity.height,
+            mimeType = entity.mimeType,
+            dateAdded = entity.dateAdded,
+            lastSeenAt = entity.lastSeenAt,
+            sourceType = entity.sourceType,
+            persistedPermission = entity.persistedPermission,
+            lastAccessCheckAt = entity.lastAccessCheckAt,
+            accessState = runCatching { VideoAccessState.valueOf(entity.accessState) }
                 .getOrDefault(VideoAccessState.Unknown),
             probeResult = MediaProbeResult(
-                containerMimeType = probeContainerMimeType,
-                videoMimeType = probeVideoMimeType,
-                codecFamily = codecFamily,
-                profileLevel = profileLevel,
-                width = width,
-                height = height,
-                frameRate = frameRate,
-                bitrate = bitrate,
-                bitDepth = bitDepth,
-                hdrFormat = hdrFormat,
-                decoderName = decoderName,
-                supportStatus = runCatching { CodecSupportStatus.valueOf(codecSupportStatus) }
+                containerMimeType = entity.probeContainerMimeType,
+                videoMimeType = entity.probeVideoMimeType,
+                codecFamily = entity.codecFamily,
+                profileLevel = entity.profileLevel,
+                width = entity.width,
+                height = entity.height,
+                frameRate = entity.frameRate,
+                bitrate = entity.bitrate,
+                bitDepth = entity.bitDepth,
+                hdrFormat = entity.hdrFormat,
+                decoderName = entity.decoderName,
+                supportStatus = runCatching { CodecSupportStatus.valueOf(entity.codecSupportStatus) }
                     .getOrDefault(CodecSupportStatus.Unknown),
-                warnings = codecWarnings.lines().filter { it.isNotBlank() },
+                warnings = entity.codecWarnings.lines().filter { it.isNotBlank() },
             ),
+            playbackPositionMs = progress?.positionMs ?: 0L,
+            playbackCompleted = progress?.completed ?: false,
+            playbackUpdatedAt = progress?.updatedAt ?: 0L,
         )
+    }
+
+    private fun createThumbnail(uri: Uri): String? {
+        return runCatching {
+            val outputFile = File(thumbnailDirectory(), "${uri.toString().sha256()}.jpg")
+            if (outputFile.exists() && outputFile.length() > 0L) return outputFile.absolutePath
+
+            val retriever = MediaMetadataRetriever()
+            val bitmap = retriever.use {
+                contentResolver.openFileDescriptor(uri, "r")?.use { descriptor ->
+                    it.setDataSource(descriptor.fileDescriptor)
+                }
+                it.getFrameAtTime(1_000_000L, MediaMetadataRetriever.OPTION_CLOSEST_SYNC)
+                    ?: it.frameAtTime
+            } ?: return null
+
+            outputFile.outputStream().use { stream ->
+                bitmap.compress(Bitmap.CompressFormat.JPEG, 82, stream)
+            }
+            outputFile.absolutePath
+        }.getOrNull()
+    }
+
+    private fun thumbnailDirectory(): File {
+        return File(context.filesDir, "library-thumbnails").apply { mkdirs() }
+    }
+
+    private fun String.sha256(): String {
+        return MessageDigest.getInstance("SHA-256")
+            .digest(toByteArray())
+            .joinToString(separator = "") { byte -> "%02x".format(byte) }
     }
 }

@@ -13,6 +13,8 @@ data class VideoEntity(
     val id: Long = 0L,
     val uri: String,
     val displayName: String,
+    val displayTitleOverride: String,
+    val thumbnailPath: String,
     val durationMs: Long,
     val width: Int,
     val height: Int,

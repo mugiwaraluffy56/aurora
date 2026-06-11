@@ -29,6 +29,7 @@ class DefaultAppContainer(
     )
         .addMigrations(MIGRATION_1_2)
         .addMigrations(MIGRATION_2_3)
+        .addMigrations(MIGRATION_3_4)
         .build()
 
     private val player: ExoPlayer = ExoPlayer.Builder(applicationContext).build().apply {
@@ -98,6 +99,13 @@ class DefaultAppContainer(
                 db.execSQL("ALTER TABLE `videos` ADD COLUMN `decoderName` TEXT NOT NULL DEFAULT ''")
                 db.execSQL("ALTER TABLE `videos` ADD COLUMN `codecSupportStatus` TEXT NOT NULL DEFAULT 'Unknown'")
                 db.execSQL("ALTER TABLE `videos` ADD COLUMN `codecWarnings` TEXT NOT NULL DEFAULT 'Codec support has not been probed yet.'")
+            }
+        }
+
+        val MIGRATION_3_4 = object : Migration(3, 4) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE `videos` ADD COLUMN `displayTitleOverride` TEXT NOT NULL DEFAULT ''")
+                db.execSQL("ALTER TABLE `videos` ADD COLUMN `thumbnailPath` TEXT NOT NULL DEFAULT ''")
             }
         }
     }

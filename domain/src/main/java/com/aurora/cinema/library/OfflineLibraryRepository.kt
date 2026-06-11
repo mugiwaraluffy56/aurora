@@ -12,6 +12,8 @@ interface OfflineLibraryRepository {
 
     suspend fun refreshAccessChecks()
 
+    suspend fun renameDisplayTitle(videoId: Long, title: String)
+
     suspend fun deleteLibraryEntry(videoId: Long)
 
     object SourceTypes {

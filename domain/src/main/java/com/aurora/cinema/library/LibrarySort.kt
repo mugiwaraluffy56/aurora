@@ -6,4 +6,6 @@ enum class LibrarySort(
     Recent("Recent"),
     Title("Title"),
     Duration("Duration"),
+    Resolution("Resolution"),
+    Progress("Progress"),
 }

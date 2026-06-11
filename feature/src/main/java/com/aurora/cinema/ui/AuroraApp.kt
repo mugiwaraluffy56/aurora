@@ -4,6 +4,7 @@ import android.app.Activity
 import android.content.Context
 import android.content.ContextWrapper
 import android.content.pm.ActivityInfo
+import android.graphics.BitmapFactory
 import android.net.Uri
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -24,6 +25,7 @@ import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
@@ -101,6 +103,7 @@ import androidx.compose.ui.draw.BlurredEdgeTreatment
 import androidx.compose.ui.draw.blur
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
@@ -109,6 +112,7 @@ import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -314,6 +318,11 @@ private fun AuroraShell(
                             selectedScreen = AppScreen.Library
                             scope.launch {
                                 appContainer.libraryRepository.deleteLibraryEntry(videoId)
+                            }
+                        },
+                        onRename = { videoId, title ->
+                            scope.launch {
+                                appContainer.libraryRepository.renameDisplayTitle(videoId, title)
                             }
                         },
                     )
@@ -873,8 +882,17 @@ private fun LibraryScreen(
                 LibrarySort.Recent -> compareByDescending<VideoItem> { it.lastSeenAt }
                 LibrarySort.Title -> compareBy { it.displayName.lowercase() }
                 LibrarySort.Duration -> compareByDescending { it.durationMs }
+                LibrarySort.Resolution -> compareByDescending { it.width * it.height }
+                LibrarySort.Progress -> compareByDescending { it.playbackUpdatedAt }
             },
         )
+    val continueWatching = videos
+        .filter { it.playbackPositionMs > 0L && !it.playbackCompleted }
+        .sortedByDescending { it.playbackUpdatedAt }
+        .take(4)
+    val recentVideos = videos.sortedByDescending { it.lastSeenAt }.take(4)
+    val missingCount = videos.count { it.accessState == VideoAccessState.Missing }
+    val sessionOnlyCount = videos.count { it.accessState == VideoAccessState.Available && !it.persistedPermission }
 
     ScreenColumn {
         Row(
@@ -939,6 +957,42 @@ private fun LibraryScreen(
                 }
             }
             Spacer(modifier = Modifier.height(20.dp))
+            if (missingCount > 0 || sessionOnlyCount > 0) {
+                LibraryWarningPanel(
+                    missingCount = missingCount,
+                    sessionOnlyCount = sessionOnlyCount,
+                    onRefresh = {
+                        scope.launch { repository.refreshAccessChecks() }
+                    },
+                )
+                Spacer(modifier = Modifier.height(20.dp))
+            }
+            if (continueWatching.isNotEmpty()) {
+                SectionLabel("CONTINUE WATCHING")
+                Spacer(modifier = Modifier.height(8.dp))
+                continueWatching.forEach { video ->
+                    VideoListItem(
+                        video = video,
+                        onOpenDetails = { onOpenDetails(video.id) },
+                    )
+                    Spacer(modifier = Modifier.height(8.dp))
+                }
+                Spacer(modifier = Modifier.height(12.dp))
+            }
+            if (recentVideos.isNotEmpty()) {
+                SectionLabel("RECENTLY ADDED")
+                Spacer(modifier = Modifier.height(8.dp))
+                recentVideos.forEach { video ->
+                    CompactVideoRow(
+                        video = video,
+                        onOpenDetails = { onOpenDetails(video.id) },
+                    )
+                    Spacer(modifier = Modifier.height(8.dp))
+                }
+                Spacer(modifier = Modifier.height(12.dp))
+            }
+            SectionLabel("ALL VIDEOS")
+            Spacer(modifier = Modifier.height(8.dp))
             if (filteredVideos.isEmpty()) {
                 EmptyState(
                     icon = Icons.Default.VideoLibrary,
@@ -954,6 +1008,82 @@ private fun LibraryScreen(
                     Spacer(modifier = Modifier.height(8.dp))
                 }
             }
+        }
+    }
+}
+
+@Composable
+private fun LibraryWarningPanel(
+    missingCount: Int,
+    sessionOnlyCount: Int,
+    onRefresh: () -> Unit,
+) {
+    Surface(
+        color = MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.72f),
+        contentColor = MaterialTheme.colorScheme.onErrorContainer,
+        shape = RoundedCornerShape(14.dp),
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.error.copy(alpha = 0.28f)),
+    ) {
+        Column(modifier = Modifier.padding(14.dp)) {
+            Text(
+                text = "Storage access needs attention",
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.SemiBold,
+            )
+            Spacer(modifier = Modifier.height(4.dp))
+            val parts = listOfNotNull(
+                if (missingCount > 0) "$missingCount missing ${if (missingCount == 1) "file" else "files"}" else null,
+                if (sessionOnlyCount > 0) "$sessionOnlyCount available only for this session" else null,
+            )
+            Text(
+                text = parts.joinToString(separator = " · "),
+                style = MaterialTheme.typography.bodyMedium,
+            )
+            Spacer(modifier = Modifier.height(8.dp))
+            GlassSecondaryButton(
+                label = "Refresh access checks",
+                onClick = onRefresh,
+                modifier = Modifier.fillMaxWidth(),
+            )
+        }
+    }
+}
+
+@Composable
+private fun CompactVideoRow(
+    video: VideoItem,
+    onOpenDetails: () -> Unit,
+) {
+    Surface(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable(onClick = onOpenDetails),
+        color = MaterialTheme.colorScheme.surface.copy(alpha = 0.72f),
+        shape = RoundedCornerShape(12.dp),
+    ) {
+        Row(
+            modifier = Modifier.padding(12.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            VideoThumbnail(video = video, modifier = Modifier.size(60.dp))
+            Spacer(modifier = Modifier.size(12.dp))
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = video.displayName,
+                    style = MaterialTheme.typography.titleSmall,
+                    maxLines = 1,
+                )
+                Text(
+                    text = video.watchStatusLabel(),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            Icon(
+                imageVector = Icons.Default.ChevronRight,
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
         }
     }
 }
@@ -1278,6 +1408,7 @@ private fun VideoDetailsScreen(
     playbackState: PlaybackState,
     onPlay: (VideoItem) -> Unit,
     onDelete: (Long) -> Unit,
+    onRename: (Long, String) -> Unit,
 ) {
     ScreenColumn {
         if (video == null) {
@@ -1287,6 +1418,7 @@ private fun VideoDetailsScreen(
                 body = "Open a title from your library to see its media details.",
             )
         } else {
+            var titleDraft by remember(video.id, video.displayName) { mutableStateOf(video.displayName) }
             Text(text = video.displayName, style = MaterialTheme.typography.headlineMedium)
             Spacer(modifier = Modifier.height(4.dp))
             Text(
@@ -1295,6 +1427,29 @@ private fun VideoDetailsScreen(
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
             Spacer(modifier = Modifier.height(24.dp))
+            VideoThumbnail(
+                video = video,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(190.dp),
+            )
+            Spacer(modifier = Modifier.height(20.dp))
+            SectionLabel("TITLE")
+            OutlinedTextField(
+                value = titleDraft,
+                onValueChange = { titleDraft = it },
+                modifier = Modifier.fillMaxWidth(),
+                singleLine = true,
+                label = { Text("Display title") },
+            )
+            Spacer(modifier = Modifier.height(8.dp))
+            GlassSecondaryButton(
+                label = "Save local title",
+                enabled = titleDraft.isNotBlank() && titleDraft != video.displayName,
+                onClick = { onRename(video.id, titleDraft) },
+                modifier = Modifier.fillMaxWidth(),
+            )
+            Spacer(modifier = Modifier.height(20.dp))
             SectionLabel("MEDIA")
             StatusRow(label = "Duration", value = video.durationLabel())
             StatusRow(label = "Resolution", value = video.resolutionLabel())
@@ -1313,7 +1468,11 @@ private fun VideoDetailsScreen(
             StatusRow(label = "Access", value = video.accessLabel())
             StatusRow(
                 label = "Playback",
-                value = if (playbackState.selectedVideo?.id == video.id) "Loaded" else "Not loaded",
+                value = video.watchStatusLabel(),
+            )
+            StatusRow(
+                label = "Now loaded",
+                value = if (playbackState.selectedVideo?.id == video.id) "Yes" else "No",
             )
             if (video.probeResult.warnings.isNotEmpty()) {
                 Spacer(modifier = Modifier.height(8.dp))
@@ -2031,12 +2190,7 @@ private fun VideoListItem(
             modifier = Modifier.padding(16.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            Icon(
-                imageVector = Icons.Default.PlayCircle,
-                contentDescription = null,
-                modifier = Modifier.size(32.dp),
-                tint = MaterialTheme.colorScheme.primary,
-            )
+            VideoThumbnail(video = video, modifier = Modifier.size(78.dp))
             Spacer(modifier = Modifier.size(12.dp))
             Column(modifier = Modifier.weight(1f)) {
                 Text(
@@ -2046,7 +2200,7 @@ private fun VideoListItem(
                 )
                 Spacer(modifier = Modifier.height(2.dp))
                 Text(
-                    text = "${video.durationLabel()}  ·  ${video.resolutionLabel()}",
+                    text = "${video.durationLabel()}  ·  ${video.resolutionLabel()}  ·  ${video.watchStatusLabel()}",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
@@ -2056,6 +2210,57 @@ private fun VideoListItem(
                 contentDescription = null,
                 tint = MaterialTheme.colorScheme.onSurfaceVariant,
             )
+        }
+    }
+}
+
+@Composable
+private fun VideoThumbnail(
+    video: VideoItem,
+    modifier: Modifier = Modifier,
+) {
+    val bitmap = remember(video.thumbnailPath) {
+        video.thumbnailPath
+            .takeIf { it.isNotBlank() }
+            ?.let { path -> BitmapFactory.decodeFile(path) }
+    }
+    Surface(
+        modifier = modifier,
+        color = MaterialTheme.colorScheme.surfaceVariant,
+        shape = RoundedCornerShape(10.dp),
+    ) {
+        Box(contentAlignment = Alignment.Center) {
+            if (bitmap != null) {
+                Image(
+                    bitmap = bitmap.asImageBitmap(),
+                    contentDescription = null,
+                    contentScale = ContentScale.Crop,
+                    modifier = Modifier.fillMaxSize(),
+                )
+            } else {
+                Icon(
+                    imageVector = Icons.Default.PlayCircle,
+                    contentDescription = null,
+                    modifier = Modifier.size(32.dp),
+                    tint = MaterialTheme.colorScheme.primary,
+                )
+            }
+            if (video.playbackPositionMs > 0L && video.durationMs > 0L) {
+                Box(
+                    modifier = Modifier
+                        .align(Alignment.BottomStart)
+                        .fillMaxWidth()
+                        .height(4.dp)
+                        .background(MaterialTheme.colorScheme.outline.copy(alpha = 0.35f)),
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth(video.progressFraction())
+                            .height(4.dp)
+                            .background(MaterialTheme.colorScheme.primary),
+                    )
+                }
+            }
         }
     }
 }
@@ -2368,6 +2573,20 @@ private fun VideoItem.accessLabel(): String {
     }
 }
 
+private fun VideoItem.watchStatusLabel(): String {
+    return when {
+        playbackCompleted -> "Watched"
+        playbackPositionMs > 0L && durationMs > 0L -> "${(progressFraction() * 100f).toInt()}% watched"
+        playbackPositionMs > 0L -> "In progress"
+        else -> "Not started"
+    }
+}
+
+private fun VideoItem.progressFraction(): Float {
+    if (durationMs <= 0L) return 0f
+    return (playbackPositionMs.toFloat() / durationMs.toFloat()).coerceIn(0f, 1f)
+}
+
 private fun CodecSupportStatus.label(): String {
     return when (this) {
         CodecSupportStatus.Supported -> "Supported"
@@ -2437,6 +2656,8 @@ private fun AuroraAppPreview() {
                     }
 
                     override suspend fun refreshAccessChecks() = Unit
+
+                    override suspend fun renameDisplayTitle(videoId: Long, title: String) = Unit
 
                     override suspend fun deleteLibraryEntry(videoId: Long) = Unit
                 }
