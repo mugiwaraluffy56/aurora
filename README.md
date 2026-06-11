@@ -25,15 +25,19 @@ The first experience is intentionally minimal: a dark cinema environment with a 
 ## Build
 
 ```sh
-./gradlew testDebugUnitTest assembleDebug assembleRelease
+./gradlew testDebugUnitTest lintDebug assembleDebug assembleRelease bundleRelease
 ```
 
-APK outputs:
+Build outputs:
 
 ```text
 app/build/outputs/apk/debug/app-debug.apk
 app/build/outputs/apk/release/app-release-unsigned.apk
+app/build/outputs/bundle/release/app-release.aab
 ```
+
+Device install and release packaging steps are documented in
+`docs/package-install.md`.
 
 ## Architecture
 
