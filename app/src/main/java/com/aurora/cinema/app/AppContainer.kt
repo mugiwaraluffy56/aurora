@@ -2,6 +2,7 @@ package com.aurora.cinema.app
 
 import android.content.Context
 import androidx.media3.exoplayer.ExoPlayer
+import androidx.media3.exoplayer.DefaultRenderersFactory
 import androidx.room.Room
 import androidx.room.migration.Migration
 import androidx.sqlite.db.SupportSQLiteDatabase
@@ -39,7 +40,10 @@ class DefaultAppContainer(
         .addMigrations(MIGRATION_3_4)
         .build()
 
-    private val player: ExoPlayer = ExoPlayer.Builder(applicationContext).build().apply {
+    private val player: ExoPlayer = ExoPlayer.Builder(
+        applicationContext,
+        DefaultRenderersFactory(applicationContext).setEnableDecoderFallback(true),
+    ).build().apply {
         playWhenReady = false
     }
 

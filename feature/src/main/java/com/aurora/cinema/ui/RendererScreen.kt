@@ -24,6 +24,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.aurora.cinema.app.AppContainer
 import com.aurora.cinema.playback.PlaybackState
 import com.aurora.cinema.render.*
+import com.aurora.cinema.render.StereoVideoLayout
 import com.aurora.cinema.session.AndroidSessionEnvironment
 import com.aurora.cinema.session.SessionEnvironment
 import com.aurora.cinema.settings.AppSettings
@@ -73,6 +74,7 @@ internal fun RendererScreen(
     var previewMode by rememberSaveable { mutableStateOf(0) }
     val aspectModes = ScreenAspectRatio.entries
     val cropModes = ScreenCropMode.entries
+    val videoLayouts = StereoVideoLayout.entries
 
     Box(modifier = Modifier.fillMaxSize().background(BodyBg)) {
         ScreenScroll(topPadding = 76) {
@@ -88,6 +90,41 @@ internal fun RendererScreen(
                 Segmented(options = listOf("Mono", "Stereo", "Mesh"), selectedIndex = previewMode,
                     onSelect = { idx -> previewMode = idx; stereoPreviewEnabled = (idx == 1); renderEngine.setDiagnosticMeshEnabled(idx == 2) },
                     modifier = Modifier.fillMaxWidth().padding(10.dp))
+            }
+
+            SectionHeader(title = "Video format")
+            GlassCard {
+                // Mono = normal 2D / SBS = side-by-side 3D (most VR content) / OU = over-under 3D
+                val currentLayout = settings.stereoConfig.videoLayout
+                ListRow(
+                    title = "Video layout",
+                    subtitle = when (currentLayout) {
+                        StereoVideoLayout.Mono -> "Standard 2D — one image fills the screen"
+                        StereoVideoLayout.SideBySide -> "Side-by-side 3D — left/right eye halves"
+                        StereoVideoLayout.OverUnder -> "Over-under 3D — top/bottom eye halves"
+                    },
+                    iconTint = VioletColor,
+                    leadingIcon = Icons.Default.ViewInAr,
+                    value = when (currentLayout) {
+                        StereoVideoLayout.Mono -> "Mono ›"
+                        StereoVideoLayout.SideBySide -> "SBS ›"
+                        StereoVideoLayout.OverUnder -> "O/U ›"
+                    },
+                    onClick = {
+                        val next = videoLayouts[(videoLayouts.indexOf(currentLayout) + 1) % videoLayouts.size]
+                        scope.launch { repository.setStereoConfig(settings.stereoConfig.copy(videoLayout = next)) }
+                    },
+                )
+                RowDivider()
+                val swapped = settings.stereoConfig.swapEyes
+                ToggleRow(
+                    title = "Swap eyes",
+                    subtitle = "If 3D depth looks inverted, enable this",
+                    iconTint = TealColor,
+                    leadingIcon = Icons.Default.SwapHoriz,
+                    checked = swapped,
+                    onCheckedChange = { scope.launch { repository.setStereoConfig(settings.stereoConfig.copy(swapEyes = it)) } },
+                )
             }
 
             SectionHeader(title = "Screen geometry")
