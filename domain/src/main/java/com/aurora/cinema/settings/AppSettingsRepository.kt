@@ -1,6 +1,7 @@
 package com.aurora.cinema.settings
 
 import kotlinx.coroutines.flow.Flow
+import com.aurora.cinema.input.HardwareInputSettings
 import com.aurora.cinema.playback.SubtitleSettings
 import com.aurora.cinema.render.CinemaScreenConfig
 import com.aurora.cinema.render.HeadsetProfile
@@ -22,4 +23,6 @@ interface AppSettingsRepository {
     suspend fun setHeadsetProfile(profile: HeadsetProfile)
 
     suspend fun setSubtitleSettings(settings: SubtitleSettings)
+
+    suspend fun setHardwareInputSettings(settings: HardwareInputSettings)
 }

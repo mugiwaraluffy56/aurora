@@ -1,6 +1,7 @@
 package com.aurora.cinema.app
 
 import android.content.Context
+import com.aurora.cinema.input.HardwareInputController
 import com.aurora.cinema.library.OfflineLibraryRepository
 import com.aurora.cinema.media.CodecCapabilityService
 import com.aurora.cinema.media.DeviceDisplayInfo
@@ -13,6 +14,7 @@ interface AppContainer {
     val settingsRepository: AppSettingsRepository
     val libraryRepository: OfflineLibraryRepository
     val playerController: PlayerController
+    val hardwareInputController: HardwareInputController
     val mediaSessionController: MediaSessionController
     val codecCapabilityService: CodecCapabilityService
     val deviceDisplayInfo: DeviceDisplayInfo

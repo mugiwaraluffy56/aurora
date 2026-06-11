@@ -124,6 +124,7 @@ import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
 import com.aurora.cinema.app.AppContainer
 import com.aurora.cinema.core.nativebridge.NativeCore
+import com.aurora.cinema.input.InputAction
 import com.aurora.cinema.library.ImportResult
 import com.aurora.cinema.library.LibrarySort
 import com.aurora.cinema.library.OfflineLibraryRepository
@@ -155,6 +156,7 @@ import com.aurora.cinema.ui.theme.AuroraGlass
 import com.aurora.cinema.ui.theme.AuroraControlTrack
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.launch
 
@@ -1126,6 +1128,14 @@ private fun PlayerScreen(
         appContainer.playerController.setVideoSurface(videoSurface)
     }
 
+    LaunchedEffect(appContainer.hardwareInputController, headTracker.available) {
+        appContainer.hardwareInputController.actions.collect { action ->
+            if (action == InputAction.Recenter) {
+                if (headTracker.available) headTracker.recenter() else renderEngine.recenter()
+            }
+        }
+    }
+
     LaunchedEffect(playbackState.videoWidth, playbackState.videoHeight) {
         renderEngine.setVideoSize(playbackState.videoWidth, playbackState.videoHeight)
     }
@@ -1526,6 +1536,26 @@ private fun SettingsScreen(
                 scope.launch { repository.setComfortModeEnabled(enabled) }
             },
         )
+        HorizontalDivider(color = MaterialTheme.colorScheme.outline)
+        Spacer(modifier = Modifier.height(20.dp))
+        SectionLabel("HARDWARE INPUT")
+        SettingSwitchRow(
+            label = "Use volume keys for shortcuts",
+            body = "Off keeps Android volume controls unchanged",
+            checked = settings.hardwareInputSettings.consumeVolumeKeys,
+            onCheckedChange = { enabled ->
+                scope.launch {
+                    repository.setHardwareInputSettings(
+                        settings.hardwareInputSettings.copy(consumeVolumeKeys = enabled),
+                    )
+                }
+            },
+        )
+        Spacer(modifier = Modifier.height(8.dp))
+        settings.hardwareInputSettings.bindings.forEach { binding ->
+            StatusRow(label = binding.input.label, value = binding.action.label)
+        }
+        Spacer(modifier = Modifier.height(20.dp))
         HorizontalDivider(color = MaterialTheme.colorScheme.outline)
         Spacer(modifier = Modifier.height(20.dp))
         Text(
@@ -2682,6 +2712,11 @@ private fun AuroraAppPreview() {
 
                     override fun setSubtitleSettings(settings: SubtitleSettings) = Unit
                 }
+                override val hardwareInputController = object : com.aurora.cinema.input.HardwareInputController {
+                    override val actions: kotlinx.coroutines.flow.SharedFlow<InputAction> = MutableSharedFlow()
+
+                    override fun updateSettings(settings: com.aurora.cinema.input.HardwareInputSettings) = Unit
+                }
                 override val mediaSessionController: com.aurora.cinema.playback.MediaSessionController
                     get() = error("Preview does not create a media session")
                 override val codecCapabilityService = com.aurora.cinema.media.CodecCapabilityService()
@@ -2704,6 +2739,10 @@ private fun AuroraAppPreview() {
                     override suspend fun setHeadsetProfile(profile: com.aurora.cinema.render.HeadsetProfile) = Unit
 
                     override suspend fun setSubtitleSettings(settings: SubtitleSettings) = Unit
+
+                    override suspend fun setHardwareInputSettings(
+                        settings: com.aurora.cinema.input.HardwareInputSettings,
+                    ) = Unit
                 }
             },
         )

@@ -8,6 +8,10 @@ import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.floatPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
+import com.aurora.cinema.input.HardwareInputSettings
+import com.aurora.cinema.input.InputAction
+import com.aurora.cinema.input.InputBinding
+import com.aurora.cinema.input.PhysicalInput
 import com.aurora.cinema.playback.SubtitleSettings
 import com.aurora.cinema.render.CinemaScreenConfig
 import com.aurora.cinema.render.HeadsetProfile
@@ -83,6 +87,10 @@ class DataStoreAppSettingsRepository(
                     depthMeters = preferences[Keys.subtitleDepth] ?: 6f,
                     audioDelayMs = (preferences[Keys.audioDelayMs] ?: 0f).toLong(),
                 ).clamped(),
+                hardwareInputSettings = HardwareInputSettings(
+                    bindings = preferences[Keys.hardwareInputBindings].toBindings(),
+                    consumeVolumeKeys = preferences[Keys.consumeVolumeKeys] ?: false,
+                ),
             )
         }
 
@@ -156,6 +164,13 @@ class DataStoreAppSettingsRepository(
         }
     }
 
+    override suspend fun setHardwareInputSettings(settings: HardwareInputSettings) {
+        dataStore.edit { preferences ->
+            preferences[Keys.hardwareInputBindings] = settings.bindings.serialize()
+            preferences[Keys.consumeVolumeKeys] = settings.consumeVolumeKeys
+        }
+    }
+
     private object Keys {
         val firstRunAcknowledged = booleanPreferencesKey("first_run_acknowledged")
         val comfortModeEnabled = booleanPreferencesKey("comfort_mode_enabled")
@@ -190,9 +205,33 @@ class DataStoreAppSettingsRepository(
         val subtitleVerticalOffset = floatPreferencesKey("subtitle_vertical_offset")
         val subtitleDepth = floatPreferencesKey("subtitle_depth")
         val audioDelayMs = floatPreferencesKey("audio_delay_ms")
+        val hardwareInputBindings = stringPreferencesKey("hardware_input_bindings")
+        val consumeVolumeKeys = booleanPreferencesKey("consume_volume_keys")
     }
 }
 
 private inline fun <reified T : Enum<T>> String?.enumValueOrDefault(default: T): T {
     return enumValues<T>().firstOrNull { it.name == this } ?: default
+}
+
+private fun String?.toBindings(): List<InputBinding> {
+    if (isNullOrBlank()) return HardwareInputSettings.defaultBindings
+    val parsed = split(";").mapNotNull { encoded ->
+        val parts = encoded.split("=")
+        if (parts.size != 2) return@mapNotNull null
+        val input = parts[0].enumValueOrNull<PhysicalInput>()
+        val action = parts[1].enumValueOrNull<InputAction>()
+        if (input != null && action != null) InputBinding(input, action) else null
+    }
+    return parsed.ifEmpty { HardwareInputSettings.defaultBindings }
+}
+
+private fun List<InputBinding>.serialize(): String {
+    return joinToString(separator = ";") { binding ->
+        "${binding.input.name}=${binding.action.name}"
+    }
+}
+
+private inline fun <reified T : Enum<T>> String?.enumValueOrNull(): T? {
+    return enumValues<T>().firstOrNull { it.name == this }
 }

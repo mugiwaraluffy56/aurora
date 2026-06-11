@@ -6,6 +6,8 @@ import androidx.room.Room
 import androidx.room.migration.Migration
 import androidx.sqlite.db.SupportSQLiteDatabase
 import com.aurora.cinema.library.AndroidVideoMetadataReader
+import com.aurora.cinema.input.AndroidHardwareInputController
+import com.aurora.cinema.input.HardwareInputController
 import com.aurora.cinema.library.OfflineLibraryRepository
 import com.aurora.cinema.library.RoomOfflineLibraryRepository
 import com.aurora.cinema.library.db.AuroraDatabase
@@ -18,10 +20,15 @@ import com.aurora.cinema.playback.PlaybackProgressStore
 import com.aurora.cinema.settings.AppSettingsRepository
 import com.aurora.cinema.settings.DataStoreAppSettingsRepository
 import com.aurora.cinema.playback.PlayerController
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.launch
 
 class DefaultAppContainer(
     override val applicationContext: Context,
 ) : AppContainer {
+    private val appScope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
     private val database: AuroraDatabase = Room.databaseBuilder(
         applicationContext,
         AuroraDatabase::class.java,
@@ -63,11 +70,22 @@ class DefaultAppContainer(
             progressStore = PlaybackProgressStore(database.videoDao()),
         )
 
+    override val hardwareInputController: HardwareInputController =
+        AndroidHardwareInputController(playerController)
+
     override val mediaSessionController: MediaSessionController =
         MediaSessionController(
             context = applicationContext,
             player = player,
         )
+
+    init {
+        appScope.launch {
+            settingsRepository.settings.collect { settings ->
+                hardwareInputController.updateSettings(settings.hardwareInputSettings)
+            }
+        }
+    }
 
     private companion object {
         val MIGRATION_1_2 = object : Migration(1, 2) {
