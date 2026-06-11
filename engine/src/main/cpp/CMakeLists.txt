@@ -17,3 +17,6 @@ target_link_libraries(
     android
     log
 )
+
+# 16KB page size — required for Android 15+ (API 35)
+target_link_options(aurora_native PRIVATE "-Wl,-z,max-page-size=16384")

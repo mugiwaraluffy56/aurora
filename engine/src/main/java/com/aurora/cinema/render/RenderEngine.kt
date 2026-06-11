@@ -32,8 +32,8 @@ class RenderEngine {
         post { resize(width, height) }
     }
 
-    fun detachSurface() {
-        post { clearSurface() }
+    fun detachSurface(surface: Surface) {
+        post { clearSurface(surface) }
     }
 
     fun resume() {

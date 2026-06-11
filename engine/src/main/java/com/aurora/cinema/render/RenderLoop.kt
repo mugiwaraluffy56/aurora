@@ -74,10 +74,11 @@ internal class RenderLoop(
         }
     }
 
-    fun clearSurface() {
+    fun clearSurface(surface: Surface) {
+        if (this.surface != surface) return
         frameClock.stop()
         releaseGl()
-        surface = null
+        this.surface = null
         publish(RenderState.WaitingForSurface)
     }
 

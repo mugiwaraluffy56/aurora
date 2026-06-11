@@ -24,7 +24,7 @@ class AuroraRenderView @JvmOverloads constructor(
     }
 
     override fun surfaceDestroyed(holder: SurfaceHolder) {
-        renderEngine.detachSurface()
+        renderEngine.detachSurface(holder.surface)
     }
 
     fun release() {
