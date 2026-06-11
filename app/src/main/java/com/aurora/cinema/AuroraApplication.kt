@@ -15,6 +15,7 @@ class AuroraApplication : Application(), MediaSessionOwner {
 
     override fun onCreate() {
         super.onCreate()
+        CrashReporter.install(this)
         appContainer = DefaultAppContainer(this)
     }
 }
