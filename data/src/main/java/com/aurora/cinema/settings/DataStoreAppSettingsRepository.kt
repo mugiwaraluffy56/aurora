@@ -20,6 +20,7 @@ import com.aurora.cinema.render.ScreenCropMode
 import com.aurora.cinema.render.StereoConfig
 import com.aurora.cinema.render.StereoRenderMode
 import com.aurora.cinema.render.StereoVideoLayout
+import com.aurora.cinema.render.VideoProjection
 import java.io.IOException
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.catch
@@ -70,6 +71,8 @@ class DataStoreAppSettingsRepository(
                         .enumValueOrDefault(StereoVideoLayout.Mono),
                     swapEyes = preferences[Keys.stereoSwapEyes] ?: false,
                 ),
+                videoProjection = preferences[Keys.videoProjection]
+                    .enumValueOrDefault(VideoProjection.Cinema),
                 headsetProfile = HeadsetProfile(
                     id = preferences[Keys.headsetId] ?: "default",
                     name = preferences[Keys.headsetName] ?: "Default headset",
@@ -141,6 +144,12 @@ class DataStoreAppSettingsRepository(
         }
     }
 
+    override suspend fun setVideoProjection(projection: VideoProjection) {
+        dataStore.edit { preferences ->
+            preferences[Keys.videoProjection] = projection.name
+        }
+    }
+
     override suspend fun setHeadsetProfile(profile: HeadsetProfile) {
         val clamped = profile.clamped()
         dataStore.edit { preferences ->
@@ -196,6 +205,7 @@ class DataStoreAppSettingsRepository(
         val stereoRenderMode = stringPreferencesKey("stereo_render_mode")
         val stereoVideoLayout = stringPreferencesKey("stereo_video_layout")
         val stereoSwapEyes = booleanPreferencesKey("stereo_swap_eyes")
+        val videoProjection = stringPreferencesKey("video_projection")
         val headsetId = stringPreferencesKey("headset_id")
         val headsetName = stringPreferencesKey("headset_name")
         val headsetIpd = floatPreferencesKey("headset_ipd")

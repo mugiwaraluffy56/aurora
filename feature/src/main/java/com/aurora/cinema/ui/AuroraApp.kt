@@ -143,6 +143,7 @@ import com.aurora.cinema.render.ScreenCropMode
 import com.aurora.cinema.render.StereoConfig
 import com.aurora.cinema.render.StereoRenderMode
 import com.aurora.cinema.render.StereoVideoLayout
+import com.aurora.cinema.render.VideoProjection
 import com.aurora.cinema.session.AndroidSessionEnvironment
 import com.aurora.cinema.session.SessionComfortPolicy
 import com.aurora.cinema.session.SessionComfortState
@@ -302,6 +303,7 @@ private fun AuroraShell(
                         appContainer = appContainer,
                         screenConfig = settings.cinemaScreenConfig,
                         stereoConfig = settings.stereoConfig,
+                        videoProjection = settings.videoProjection,
                         subtitleSettings = settings.subtitleSettings,
                         comfortModeEnabled = settings.comfortModeEnabled,
                         vrMode = vrMode,
@@ -1098,6 +1100,7 @@ private fun PlayerScreen(
     appContainer: AppContainer,
     screenConfig: CinemaScreenConfig,
     stereoConfig: StereoConfig,
+    videoProjection: VideoProjection,
     subtitleSettings: SubtitleSettings,
     comfortModeEnabled: Boolean,
     vrMode: Boolean,
@@ -1139,6 +1142,10 @@ private fun PlayerScreen(
 
     LaunchedEffect(playbackState.videoWidth, playbackState.videoHeight) {
         renderEngine.setVideoSize(playbackState.videoWidth, playbackState.videoHeight)
+    }
+
+    LaunchedEffect(videoProjection) {
+        renderEngine.setVideoProjection(videoProjection)
     }
 
     LaunchedEffect(vrMode, comfortModeEnabled) {
@@ -1639,6 +1646,10 @@ private fun RendererScreen(
         renderEngine.setStereoConfig(settings.stereoConfig.copy(enabled = stereoPreviewEnabled))
     }
 
+    LaunchedEffect(settings.videoProjection) {
+        renderEngine.setVideoProjection(settings.videoProjection)
+    }
+
     LaunchedEffect(settings.headsetProfile) {
         renderEngine.setHeadsetProfile(settings.headsetProfile)
     }
@@ -1709,6 +1720,18 @@ private fun RendererScreen(
             onCheckedChange = { stereoPreviewEnabled = it },
         )
         Spacer(modifier = Modifier.height(24.dp))
+        SectionLabel("PROJECTION")
+        FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            VideoProjection.entries.forEach { projection ->
+                FilterChip(
+                    selected = settings.videoProjection == projection,
+                    onClick = { scope.launch { repository.setVideoProjection(projection) } },
+                    label = { Text(projection.label) },
+                    colors = glassChipColors(),
+                )
+            }
+        }
+        Spacer(modifier = Modifier.height(20.dp))
         SectionLabel("SCREEN PRESET")
         Text("Aspect ratio", style = MaterialTheme.typography.titleMedium)
         Spacer(modifier = Modifier.height(8.dp))
@@ -2762,6 +2785,8 @@ private fun AuroraAppPreview() {
                     override suspend fun setCinemaScreenConfig(config: CinemaScreenConfig) = Unit
 
                     override suspend fun setStereoConfig(config: StereoConfig) = Unit
+
+                    override suspend fun setVideoProjection(projection: VideoProjection) = Unit
 
                     override suspend fun setHeadsetProfile(profile: com.aurora.cinema.render.HeadsetProfile) = Unit
 

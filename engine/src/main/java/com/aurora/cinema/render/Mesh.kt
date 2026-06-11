@@ -85,5 +85,9 @@ internal class Mesh(
         ): Mesh {
             return Mesh(ScreenGeometry.buildMesh(config, videoWidth, videoHeight))
         }
+
+        fun equirectangularSphere(projection: VideoProjection): Mesh {
+            return Mesh(EquirectangularSphere.buildMesh(projection))
+        }
     }
 }

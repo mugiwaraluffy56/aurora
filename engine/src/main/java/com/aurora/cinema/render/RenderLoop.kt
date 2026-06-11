@@ -29,6 +29,7 @@ internal class RenderLoop(
     private var videoHeight = 0
     private var screenConfig = CinemaScreenConfig()
     private var stereoConfig = StereoConfig()
+    private var videoProjection = VideoProjection.Cinema
     private var headsetProfile = HeadsetProfile()
     private var screenAspectRatio = 16f / 9f
     private var projectionMatrix = MatrixMath.identity()
@@ -112,6 +113,12 @@ internal class RenderLoop(
         stereoConfig = config
         updateCameraMatrices()
         if (targetsChanged) releaseEyeTargets()
+    }
+
+    fun setVideoProjection(projection: VideoProjection) {
+        if (videoProjection == projection) return
+        videoProjection = projection
+        rebuildScreenGeometry()
     }
 
     fun setHeadsetProfile(profile: HeadsetProfile) {
@@ -306,7 +313,11 @@ internal class RenderLoop(
         )
         if (videoShader != null) {
             mesh?.release()
-            mesh = Mesh.cinemaScreen(screenConfig, videoWidth, videoHeight)
+            mesh = if (videoProjection == VideoProjection.Cinema) {
+                Mesh.cinemaScreen(screenConfig, videoWidth, videoHeight)
+            } else {
+                Mesh.equirectangularSphere(videoProjection)
+            }
         }
     }
 

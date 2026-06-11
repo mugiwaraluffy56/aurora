@@ -6,6 +6,7 @@ import com.aurora.cinema.playback.SubtitleSettings
 import com.aurora.cinema.render.CinemaScreenConfig
 import com.aurora.cinema.render.HeadsetProfile
 import com.aurora.cinema.render.StereoConfig
+import com.aurora.cinema.render.VideoProjection
 
 interface AppSettingsRepository {
     val settings: Flow<AppSettings>
@@ -19,6 +20,8 @@ interface AppSettingsRepository {
     suspend fun setCinemaScreenConfig(config: CinemaScreenConfig)
 
     suspend fun setStereoConfig(config: StereoConfig)
+
+    suspend fun setVideoProjection(projection: VideoProjection)
 
     suspend fun setHeadsetProfile(profile: HeadsetProfile)
 

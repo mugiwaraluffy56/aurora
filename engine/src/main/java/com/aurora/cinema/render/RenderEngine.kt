@@ -60,6 +60,10 @@ class RenderEngine {
         post { setStereoConfig(config) }
     }
 
+    fun setVideoProjection(projection: VideoProjection) {
+        post { setVideoProjection(projection) }
+    }
+
     fun setHeadsetProfile(profile: HeadsetProfile) {
         post { setHeadsetProfile(profile) }
     }
