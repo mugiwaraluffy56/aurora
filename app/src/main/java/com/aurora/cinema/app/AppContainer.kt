@@ -15,19 +15,9 @@ import com.aurora.cinema.media.MediaProbe
 import com.aurora.cinema.playback.MediaSessionController
 import com.aurora.cinema.playback.PlaybackEngine
 import com.aurora.cinema.playback.PlaybackProgressStore
-import com.aurora.cinema.playback.PlayerController
 import com.aurora.cinema.settings.AppSettingsRepository
 import com.aurora.cinema.settings.DataStoreAppSettingsRepository
-
-interface AppContainer {
-    val applicationContext: Context
-    val settingsRepository: AppSettingsRepository
-    val libraryRepository: OfflineLibraryRepository
-    val playerController: PlayerController
-    val mediaSessionController: MediaSessionController
-    val codecCapabilityService: CodecCapabilityService
-    val deviceDisplayInfo: DeviceDisplayInfo
-}
+import com.aurora.cinema.playback.PlayerController
 
 class DefaultAppContainer(
     override val applicationContext: Context,

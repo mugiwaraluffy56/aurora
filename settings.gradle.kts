@@ -16,3 +16,10 @@ dependencyResolutionManagement {
 
 rootProject.name = "Aurora"
 include(":app")
+include(":core")
+include(":domain")
+include(":data")
+include(":engine")
+include(":feature")
+include(":design-system")
+include(":testing")
