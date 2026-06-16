@@ -1,0 +1,71 @@
+(kicad_sch (version 20230121) (generator eeschema)
+  (paper "A4")
+  (title_block
+    (title "TapGuard Button Board")
+    (rev "1.0")
+    (company "TapGuard")
+    (comment 1 "Arduino Nano Every + 3 buttons + SSD1306 OLED"))
+
+  ;; ── Net labels ────────────────────────────────────────────────────────
+  (net_class "Default" ""
+    (add_net "GND")
+    (add_net "+5V")
+    (add_net "+3V3")
+    (add_net "BTN_YES")
+    (add_net "BTN_ALWAYS")
+    (add_net "BTN_NO")
+    (add_net "LED_YES")
+    (add_net "LED_ALWAYS")
+    (add_net "LED_NO")
+    (add_net "OLED_SDA")
+    (add_net "OLED_SCL")
+    (add_net "BUZZ"))
+
+  ;; ── Arduino Nano Every (U1) ───────────────────────────────────────────
+  ;; Pins used:
+  ;;   D2  → BTN_YES     (active-low, INPUT_PULLUP)
+  ;;   D3  → BTN_ALWAYS
+  ;;   D4  → BTN_NO
+  ;;   D5  → LED_YES     (active-high, 220Ω to LED)
+  ;;   D6  → LED_ALWAYS
+  ;;   D7  → LED_NO
+  ;;   D8  → BUZZ        (passive buzzer)
+  ;;   A4  → OLED_SDA   (I2C)
+  ;;   A5  → OLED_SCL
+  ;;   5V  → +5V rail
+  ;;   GND → GND rail
+  ;;   USB → host (Mac serial bridge)
+
+  ;; ── SW1 — YES button ──────────────────────────────────────────────────
+  ;; One pin to BTN_YES, other pin to GND
+  ;; (internal pullup in firmware → no external resistor needed)
+
+  ;; ── SW2 — YES-ALWAYS button ───────────────────────────────────────────
+  ;; One pin to BTN_ALWAYS, other pin to GND
+
+  ;; ── SW3 — NO button ───────────────────────────────────────────────────
+  ;; One pin to BTN_NO, other pin to GND
+
+  ;; ── LED1 (green) — YES ────────────────────────────────────────────────
+  ;; Anode → LED_YES via R1 (220Ω) → D5
+  ;; Cathode → GND
+
+  ;; ── LED2 (yellow) — YES-ALWAYS ────────────────────────────────────────
+  ;; Anode → LED_ALWAYS via R2 (220Ω) → D6
+  ;; Cathode → GND
+
+  ;; ── LED3 (red) — NO ───────────────────────────────────────────────────
+  ;; Anode → LED_NO via R3 (220Ω) → D7
+  ;; Cathode → GND
+
+  ;; ── BZ1 — passive buzzer ──────────────────────────────────────────────
+  ;; + → BUZZ (D8, PWM tone)
+  ;; - → GND
+
+  ;; ── U2 — SSD1306 OLED 0.91" I2C ──────────────────────────────────────
+  ;; VCC → +3V3
+  ;; GND → GND
+  ;; SDA → OLED_SDA (A4)
+  ;; SCL → OLED_SCL (A5)
+  ;; (I2C address 0x3C)
+)
